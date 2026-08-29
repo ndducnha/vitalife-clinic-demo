@@ -212,6 +212,25 @@ Lấy từ website chính thức **phongkhamvitalife.vn**:
 - **Không có tên hay số điện thoại bệnh nhân thật** trong seed.
 
 
+
+## Tối ưu cho điện thoại
+
+Bản demo dùng được thật trên điện thoại, không phải chỉ "co lại cho vừa":
+
+- **Thanh điều hướng dưới cùng (bottom nav)** — 4 mục hay dùng nhất *theo vai trò đang đăng nhập*
+  (Telesales thấy “Gọi khách”, Lễ tân thấy “Tiếp đón”…) + nút **Thêm** mở menu đầy đủ.
+  Có badge số việc cần làm, tôn trọng vùng an toàn (notch / thanh gesture của iPhone).
+- **Bảng dữ liệu tự chuyển thành danh sách thẻ** — không bắt vuốt ngang. Nhãn cột lấy tự động từ
+  tiêu đề bảng, dòng đầu làm tên khách, nút thao tác tách xuống dưới và giãn rộng cho dễ bấm.
+  Riêng ma trận phân quyền vẫn giữ dạng bảng cuộn ngang vì đó là bản chất của dữ liệu.
+- **Modal thành bottom sheet** — có thanh kéo, nội dung cuộn riêng, nút hành động to 46px dính đáy.
+- **Tìm kiếm** thu thành một nút; bấm vào mở thanh tìm kiếm toàn chiều ngang.
+- **Màn đăng nhập** xếp dọc, khối thương hiệu rút gọn thành dải đầu trang.
+- **Biểu đồ** giảm chiều cao, thưa nhãn trục để không chồng chữ; lịch tự chuyển sang chế độ
+  Ngày/Danh sách thay vì lưới tuần 7 cột.
+- **Vùng chạm ≥ 44px**, bỏ mọi vùng cuộn lồng nhau trong thẻ.
+- Kiểm chứng **không tràn ngang** ở 320 / 360 / 390 / 414px trên toàn bộ 27 màn hình.
+
 ## Triển khai lên GitHub Pages (để gửi khách duyệt)
 
 Bản demo là **static thuần** — không cần build, không cần server, không có backend.

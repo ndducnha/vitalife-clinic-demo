@@ -78,7 +78,7 @@ function loginAs(id){
   $('#hd-name').textContent=S.user.name; $('#hd-avatar').textContent=initials(S.user.name);
   $('#hd-role').textContent=S.user.roles.map(roleName).join(' · ');
   $('#branch-lb').textContent=((DB.branches.find(b=>b.id===S.user.branch)||{}).name||'').replace('Vitalife ','');
-  buildNav();
+  buildNav(); buildBottomNav();
   const home = {marketing:'#/leads',telesales:'#/telesales',reception:'#/reception',doctor:'#/doctor',manager:'#/treatment',tech:'#/sessions',op:'#/op'}[S.user.roles[0]] || '#/dashboard';
   const keep = location.hash && location.hash.length>2;
   if(!keep) location.hash = home;
@@ -100,14 +100,19 @@ function buildNav(){
     });
   });
   $('#nav').innerHTML=h;
+  if($('#bottomnav')&&$('#bottomnav').children.length) buildBottomNav();
 }
 function markNav(){
   const r=location.hash;
-  document.querySelectorAll('#nav a').forEach(a=>{
+  document.querySelectorAll('#nav a, #bottomnav a').forEach(a=>{
     const to=a.getAttribute('href');
     a.classList.toggle('active', r===to || (to!=='#/dashboard' && r.startsWith(to)));
   });
 }
+
+/* ---------- THIẾT BỊ ---------- */
+function isMobile(){ return window.innerWidth<768; }
+function isTouch(){ return window.matchMedia&&matchMedia('(hover:none)').matches; }
 
 /* ---------- THEME & SHELL CHROME ---------- */
 function applyTheme(t){
@@ -129,8 +134,33 @@ function toggleSidebar(force){
   sb.classList.toggle('open',on); sc.classList.toggle('on',on);
   $('#burger').setAttribute('aria-expanded', on?'true':'false');
 }
+function toggleSearch(on){
+  const w=$('.search'); if(!w) return;
+  w.classList.toggle('mobile-open',on);
+  if(on) setTimeout(()=>$('#gsearch').focus(),40);
+  else { $('#gsearch').value=''; $('#search-res').classList.remove('on'); }
+}
+/* Thanh điều hướng dưới cùng cho điện thoại: 4 mục hay dùng nhất theo vai trò + nút Thêm */
+function buildBottomNav(){
+  const host=$('#bottomnav'); if(!host) return;
+  const flat=NAV.flatMap(g=>g.items).filter(i=>can(i.perm));
+  const PRIO=['dashboard','telesales','reception','doctor','sessions','op','assign','calendar','treatment','customers','leads','payments','reports','admin-users'];
+  const picked=[];
+  PRIO.forEach(k=>{ if(picked.length<4){ const it=flat.find(i=>i.k===k); if(it&&!picked.includes(it)) picked.push(it); } });
+  flat.forEach(i=>{ if(picked.length<4&&!picked.includes(i)) picked.push(i); });
+  const SHORT={dashboard:'Tổng quan',customers:'Khách hàng',leads:'Lead',assign:'Phân bổ',telesales:'Gọi khách',
+    calendar:'Lịch',reception:'Tiếp đón',doctor:'Khám bệnh',treatment:'Liệu trình',sessions:'Buổi ĐT',
+    op:'CSKH',payments:'Thu tiền',reports:'Báo cáo','admin-users':'Quản trị'};
+  host.innerHTML=picked.map(i=>{
+    let b=''; try{ const n=i.badge?i.badge():0; if(n) b=`<span class="bn-badge">${n>99?'99+':n}</span>`; }catch(e){}
+    return `<a href="${i.to}" data-bk="${i.k}">${ic(i.ic,21)}<span>${SHORT[i.k]||i.lb}</span>${b}</a>`;})
+    .join('')+`<button data-bk="more" onclick="toggleSidebar(true)" aria-label="Mở toàn bộ menu">${ic('menu',21)}<span>Thêm</span></button>`;
+  markNav();
+}
 function initChrome(){
   $('#burger').innerHTML=ic('menu',18);
+  $('#search-btn').innerHTML=ic('search',18);
+  document.querySelector('.search-close').innerHTML=ic('x',18);
   $('#search-ic').innerHTML=ic('search',17);
   const un=DB.notifications.filter(n=>!n.read).length;
   $('#notif-btn').innerHTML=ic('bell',18)+(un?'<span class="dot" id="notif-count">'+un+'</span>':'');
@@ -258,7 +288,8 @@ function custTimeline(cid){ return DB.timeline.filter(t=>t.customer_id===cid); }
 
 /* ---------- SVG LINE CHART ---------- */
 function lineChart(series, opts){
-  opts=opts||{}; const W=opts.w||760, H=opts.h||280, PL=44, PR=16, PT=16, PB=34;
+  opts=opts||{}; const mob=isMobile();
+  const W=opts.w||760, H=mob?Math.min(opts.h||280,230):(opts.h||280), PL=mob?46:44, PR=16, PT=16, PB=34;
   const iw=W-PL-PR, ih=H-PT-PB;
   const active=series.filter(s=>s.on!==false&&s.points.length);
   if(!active.length) return `<div class="empty"><div class="ic-box">${ic('lineChart',16)}</div><div class="t">Chưa có dữ liệu</div><div>Bật ít nhất một chỉ số hoặc nhập lượng giá cho buổi điều trị.</div></div>`;
@@ -269,7 +300,9 @@ function lineChart(series, opts){
   /* normalize each series to 0..1 by its own min/max scale */
   const gl=5;
   for(let i=0;i<=gl;i++){ const y=PT+ih*i/gl; g+=`<line x1="${PL}" y1="${y}" x2="${W-PR}" y2="${y}" stroke="var(--line)" stroke-width="1"/>`; }
-  xs.forEach(x=>{ g+=`<text x="${X(x)}" y="${H-12}" font-size="11" fill="var(--muted)" text-anchor="middle">B${x}</text>`; });
+  const lstep=Math.ceil(xs.length/(mob?6:14))||1;
+  xs.forEach((x,i)=>{ if(i%lstep&&i!==xs.length-1) return;
+    g+=`<text x="${X(x)}" y="${H-12}" font-size="${mob?13:11}" fill="var(--muted)" text-anchor="middle">B${x}</text>`; });
   const single = active.length===1;
   if(single){
     const m=active[0].metric; const lo=Math.min(m.min, ...active[0].points.map(p=>p.y)), hi=Math.max(...active[0].points.map(p=>p.y));
@@ -290,18 +323,23 @@ function lineChart(series, opts){
     if(single) g+=`<path d="${area}" fill="${m.color}" opacity=".08"/>`;
     g+=`<path d="${dstr}" fill="none" stroke="${m.color}" stroke-width="2.5" stroke-linejoin="round" stroke-linecap="round"/>`;
     pts.forEach((p,i)=>{ g+=`<circle cx="${p[0].toFixed(1)}" cy="${p[1].toFixed(1)}" r="4.5" fill="var(--surface)" stroke="${m.color}" stroke-width="2.5"><title>Buổi ${s.points[i].x} — ${m.name}: ${s.points[i].y} ${m.unit}</title></circle>`;
-      if(single) g+=`<text x="${p[0].toFixed(1)}" y="${(p[1]-12).toFixed(1)}" font-size="11" font-weight="700" fill="${m.color}" text-anchor="middle">${s.points[i].y}</text>`; });
+      if(single&&(!mob||i%lstep===0||i===pts.length-1))
+        g+=`<text x="${p[0].toFixed(1)}" y="${(p[1]-12).toFixed(1)}" font-size="${mob?13:11}" font-weight="700" fill="${m.color}" text-anchor="middle">${s.points[i].y}</text>`; });
   });
   return `<svg viewBox="0 0 ${W} ${H}" style="width:100%;height:auto" preserveAspectRatio="xMidYMid meet">${g}</svg>`;
 }
 function barChart(data,opts){
-  opts=opts||{}; const W=opts.w||760,H=opts.h||240,PL=44,PR=10,PT=12,PB=42;
+  opts=opts||{}; const mob=isMobile();
+  if(mob&&data.length>14) data=data.slice(-14);
+  const W=opts.w||760,H=mob?Math.min(opts.h||240,210):(opts.h||240),PL=mob?40:44,PR=10,PT=12,PB=42;
   const iw=W-PL-PR, ih=H-PT-PB; const max=Math.max(...data.map(d=>d.v),1);
   const bw=iw/data.length; let g='';
   for(let i=0;i<=4;i++){ const y=PT+ih*i/4; g+=`<line x1="${PL}" y1="${y}" x2="${W-PR}" y2="${y}" stroke="var(--line)"/><text x="${PL-8}" y="${y+4}" font-size="10.5" fill="var(--muted)" text-anchor="end">${moneyS(max-(max/4)*i)}</text>`; }
   data.forEach((d,i)=>{ const h=d.v/max*ih; const x=PL+i*bw+bw*0.18, w=bw*0.64;
     g+=`<rect x="${x.toFixed(1)}" y="${(PT+ih-h).toFixed(1)}" width="${w.toFixed(1)}" height="${Math.max(h,1).toFixed(1)}" rx="4" fill="${d.color||'#0E9F8E'}"><title>${d.l}: ${money(d.v)}</title></rect>`;
-    g+=`<text x="${(x+w/2).toFixed(1)}" y="${H-14}" font-size="10.5" fill="var(--muted)" text-anchor="middle">${d.l}</text>`; });
+    const lstep=Math.ceil(data.length/(mob?5:14))||1;
+    if(i%lstep===0||i===data.length-1)
+      g+=`<text x="${(x+w/2).toFixed(1)}" y="${H-14}" font-size="${mob?12:10.5}" fill="var(--muted)" text-anchor="middle">${d.l}</text>`; });
   return `<svg viewBox="0 0 ${W} ${H}" style="width:100%;height:auto">${g}</svg>`;
 }
 function donut(data,size){
@@ -341,7 +379,7 @@ function render(){
   $('#view').innerHTML = r ? r[1](h.match(r[0])) : `<div class="empty"><div class="ic-box">${ic('alert',22)}</div><div class="t">Không tìm thấy trang</div><div>${esc(h)}</div></div>`;
   markNav(); window.scrollTo(0,0); toggleSidebar(false);
   const v=$('#view'); v.classList.remove('page-enter'); void v.offsetWidth; v.classList.add('page-enter');
-  a11yPass(v);
+  a11yPass(v); tablesToCards(v); toggleSearch(false);
 }
 window.addEventListener('hashchange',render);
 
@@ -1050,12 +1088,11 @@ function viewCustomer360(cid){
             ${co&&co.status!=='pending'?`<button class="btn" onclick="location.hash='#/treatment/${co.id}'">${ic('pill',16)} LIỆU TRÌNH</button>`:''}
           </div>
         </div>
-        <div style="text-align:right">
-          <div style="font-size:11px;opacity:.8;letter-spacing:.6px">TRẠNG THÁI</div>
-          <div style="font-size:17px;font-weight:750;margin-bottom:8px">${stLabel(c.status).toUpperCase()}</div>
-          ${co&&co.status!=='pending'?`<div style="font-size:11px;opacity:.8;letter-spacing:.6px">LIỆU TRÌNH</div>
-          <div style="font-size:17px;font-weight:750">${co.done_sessions} / ${co.total_sessions} buổi</div>
-          <div style="width:150px;margin-top:6px" class="progress"><i style="width:${co.done_sessions/co.total_sessions*100}%;background:#fff"></i></div>`:''}
+        <div class="kpi">
+          <div><div class="k">Trạng thái</div><div class="v">${stLabel(c.status).toUpperCase()}</div></div>
+          ${co&&co.status!=='pending'?`<div><div class="k">Liệu trình</div>
+            <div class="v">${co.done_sessions} / ${co.total_sessions} buổi</div>
+            <div style="width:150px;margin-top:6px" class="progress"><i style="width:${co.done_sessions/co.total_sessions*100}%"></i></div></div>`:''}
         </div>
       </div>
     </div>
@@ -1078,6 +1115,7 @@ function courseCard(co){
 /* ================= CALENDAR ================= */
 function viewCalendar(){
   const f=S.filters.cal=S.filters.cal||{view:'day',off:0,doctor:'',room:'',status:'',src:''};
+  if(isMobile()&&f.view==='week') f.view='list';
   let list=DB.appointments.slice();
   if(f.doctor) list=list.filter(a=>a.doctor===f.doctor);
   if(f.room) list=list.filter(a=>a.room===f.room);
@@ -2174,6 +2212,12 @@ function bootApp(){
   if(P.get('theme')) applyTheme(P.get('theme')==='dark'?'dark':'light');
   if(P.get('imp')) S.imp.step=Math.max(1,Math.min(6,+P.get('imp')));
   if(P.get('simp')&&S.simp) S.simp.step=Math.max(1,Math.min(6,+P.get('simp')));
+  const M=P.get('m'); if(M) setTimeout(()=>{ try{
+    if(M==='call') callModal(DB.customers.find(c=>c.assigned_to).id);
+    if(M==='book') openBooking(DB.customers[0].id);
+    if(M==='pay') openPayment();
+    if(M==='cust') openCustomerForm();
+  }catch(e){} },250);
   const q=P.get('as');
   if(q){ const u=DB.users.find(x=>x.id===q||x.roles.includes(q)||x.email.split('@')[0]===q); if(u){ loginAs(u.id); return; } }
   if(location.hash) history.replaceState(null,'','#');

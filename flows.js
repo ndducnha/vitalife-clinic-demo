@@ -867,7 +867,7 @@ function viewAdminRoles(){
      <button class="btn primary" onclick="savePerms()">${ic('check',16)} Lưu ma trận quyền</button>`)
   + `<div class="alert al-warn">${ic('shield',16)}<div>Thay đổi quyền có hiệu lực với <b>phiên đăng nhập kế tiếp</b> của nhân viên và được ghi vào nhật ký kiểm toán.
       Vai trò <b>Admin</b> luôn có toàn quyền và không thể bỏ chọn.</div></div>
-    <div class="card"><div class="tbl-wrap"><table style="min-width:1100px">
+    <div class="card"><div class="tbl-wrap"><table class="no-cards" style="min-width:1100px">
       <thead><tr><th style="min-width:280px">Quyền</th>${roles.map(r=>`<th class="t-center"><span class="badge ${r.color} nodot">${r.name}</span></th>`).join('')}</tr></thead>
       <tbody>${PERM_GROUPS.map(g=>`
         <tr><td colspan="${roles.length+1}" style="background:var(--surface-2);font-weight:700;font-size:12px;text-transform:uppercase;letter-spacing:.6px;color:var(--muted)">${g.g}</td></tr>
@@ -1354,6 +1354,46 @@ function saveCampaign(cid){
     au(new Date(),S.user.id,'create','campaigns',c.id,'—',name); }
   DB.audit.sort((a,b)=>b.at-a.at); closeModal(); toast('Đã lưu chiến dịch','ok'); render();
 }
+
+/* =========================================================================
+   MOBILE: chuyển bảng dữ liệu thành danh sách thẻ (không phải cuộn ngang)
+   Nhãn cột lấy tự động từ <th> nên không cần sửa markup từng bảng.
+   ========================================================================= */
+function tablesToCards(root){
+  root.querySelectorAll('table').forEach(t=>{
+    t.classList.remove('as-cards');
+    const wrap=t.closest('.tbl-wrap'); if(wrap) wrap.classList.remove('cards');
+    if(t.classList.contains('no-cards')) return;
+    if(!isMobile()) return;
+    const ths=[...t.querySelectorAll('thead th')].map(th=>th.textContent.replace(/\s+/g,' ').trim());
+    if(!ths.length) return;
+    const rows=[...t.querySelectorAll('tbody tr')];
+    if(!rows.length) return;
+    t.classList.add('as-cards');
+    if(wrap) wrap.classList.add('cards');
+    rows.forEach(tr=>{
+      const tds=[...tr.children];
+      if(tds.length===1&&tds[0].hasAttribute('colspan')){ tr.classList.add('full-row'); return; }
+      let head=false;
+      tds.forEach((td,i)=>{
+        const lb=ths[i]||'';
+        const onlyBox=td.children.length===1&&/^(INPUT)$/.test(td.children[0].tagName)&&!td.textContent.trim();
+        if(onlyBox){ td.classList.add('cell-check'); return; }
+        if(!td.textContent.trim()&&!td.querySelector('button,a,svg')){ td.classList.add('cell-empty'); return; }
+        if(!head){ td.classList.add('cell-head'); head=true; return; }
+        if(lb) td.setAttribute('data-label',lb);
+        if(td.querySelector('.row-actions,.btn')) td.classList.add('cell-actions');
+      });
+    });
+  });
+}
+/* Đóng menu / thanh tìm kiếm khi xoay ngang hoặc phóng to màn hình */
+let _lastMobile=null;
+window.addEventListener('resize',()=>{
+  const m=isMobile();
+  if(_lastMobile===null){ _lastMobile=m; return; }
+  if(m!==_lastMobile){ _lastMobile=m; toggleSidebar(false); toggleSearch(false); render(); }
+});
 
 /* ================= KHỞI ĐỘNG ỨNG DỤNG ================= */
 bootApp();

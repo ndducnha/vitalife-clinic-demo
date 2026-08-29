@@ -413,9 +413,9 @@ input[type=range]{accent-color:var(--brand)}
 .c360-head .btn:hover{background:rgba(255,255,255,.28);border-color:rgba(255,255,255,.45)}
 .c360-head .btn.w{background:#fff;color:var(--brand-700);border-color:#fff}
 .c360-head .btn.w:hover{background:#EAF4FC}
-.c360-head .kpi{text-align:right}
+.c360-head .kpi{text-align:right;display:flex;gap:26px;align-items:flex-end;margin-left:auto}
 .c360-head .kpi .k{font-size:10.5px;opacity:.85;letter-spacing:.7px;text-transform:uppercase}
-.c360-head .kpi .v{font-size:17px;font-weight:750}
+.c360-head .kpi .v{font-size:17px;font-weight:750;white-space:nowrap}
 
 /* ---------- MISC ---------- */
 .kv{display:grid;grid-template-columns:136px minmax(0,1fr);gap:8px 12px;font-size:13.5px}
@@ -496,4 +496,196 @@ tr.row-link:focus-visible{outline:2px solid var(--ring);outline-offset:-2px}
   .content{padding:14px}
   .card-b{padding:14px}
   .user-chip .nm,.user-chip .rl{display:none}
+}
+
+/* =========================================================================
+   MOBILE — tối ưu cho điện thoại (≤767px), có tính safe-area của iPhone
+   ========================================================================= */
+.only-mobile{display:none!important}
+.bottom-nav{display:none}
+.search-close{display:none}
+
+@media(max-width:767px){
+  :root{--header-h:56px}
+  .only-mobile{display:grid!important}
+
+  /* ---- ĐĂNG NHẬP ---- */
+  .login-wrap{grid-template-columns:1fr;min-height:100dvh}
+  .login-art{padding:20px 18px 24px;gap:16px;justify-content:flex-start;border-radius:0 0 22px 22px}
+  .login-art::after,.login-art::before{display:none}
+  .login-art h1{font-size:23px;line-height:1.2;margin:0 0 8px}
+  .login-art p{font-size:13.5px;max-width:none}
+  .login-art .login-feats,.login-art .foot{display:none}
+  .logo-chip{padding:7px 12px}
+  .logo-chip img{height:22px}
+  .login-form{padding:20px 16px 32px}
+  .login-card{max-width:none}
+  .login-card h2{font-size:21px}
+  .demo-user{padding:10px 12px}
+
+  /* ---- HEADER ---- */
+  .header{padding:0 10px;gap:6px}
+  .search{position:static;max-width:none;flex:0 0 auto}
+  .search input,.search .si,.search kbd{display:none}
+  .search.mobile-open{position:absolute;inset:0;background:var(--surface);display:flex;align-items:center;
+    padding:0 10px;z-index:60;max-width:none}
+  .search.mobile-open input{display:block;width:100%;padding-left:38px;padding-right:46px}
+  .search.mobile-open .si{display:flex;left:22px}
+  .search.mobile-open .search-close{display:grid;place-items:center;position:absolute;right:14px;top:50%;
+    transform:translateY(-50%);width:36px;height:36px;border:0;background:var(--surface-3);border-radius:9px;color:var(--muted)}
+  .search.mobile-open .search-res{position:absolute;top:calc(var(--header-h) - 4px);left:10px;right:10px}
+  .icon-btn{width:44px;height:44px}
+  .user-chip{min-height:44px;padding:4px 6px 4px 4px}
+  .user-chip>svg{display:none}
+
+  /* ---- BOTTOM NAV ---- */
+  .bottom-nav{display:grid;grid-template-columns:repeat(5,1fr);position:fixed;left:0;right:0;bottom:0;z-index:45;
+    background:var(--header-bg);backdrop-filter:blur(12px);border-top:1px solid var(--line);
+    padding-bottom:env(safe-area-inset-bottom,0px)}
+  .bottom-nav a,.bottom-nav button{display:flex;flex-direction:column;align-items:center;justify-content:center;gap:3px;
+    padding:8px 2px 7px;min-height:56px;border:0;background:none;color:var(--muted);font-size:10.5px;font-weight:600;
+    position:relative;text-align:center;line-height:1.15}
+  .bottom-nav a span,.bottom-nav button span{max-width:100%;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;padding:0 2px}
+  .bottom-nav a.active{color:var(--brand)}
+  .bottom-nav a.active::before{content:"";position:absolute;top:0;left:22%;right:22%;height:3px;
+    background:var(--brand);border-radius:0 0 4px 4px}
+  .bn-badge{position:absolute;top:5px;left:calc(50% + 5px);min-width:17px;height:17px;border-radius:9px;background:var(--danger);
+    color:#fff;font-size:9.5px;font-weight:700;display:grid;place-items:center;padding:0 4px}
+  .content{padding:14px 12px calc(74px + env(safe-area-inset-bottom,0px))}
+  .toasts{bottom:calc(74px + env(safe-area-inset-bottom,0px));right:12px;left:12px;align-items:stretch}
+  .toast{max-width:none}
+
+  /* ---- LƯỚI ---- */
+  .g6,.g5,.g4{grid-template-columns:repeat(2,minmax(0,1fr))}
+  .g3,.g2,.g-2-1,.g-1-2,.g-3-2{grid-template-columns:minmax(0,1fr)}
+  .grid{gap:10px}
+
+  /* ---- TIÊU ĐỀ TRANG ---- */
+  .page-head{gap:10px;margin-bottom:14px}
+  .page-head h1{font-size:19px}
+  .page-head .desc{font-size:12.5px}
+  .page-head .actions{width:100%;gap:8px}
+  .page-head .actions>*{flex:1 1 45%;min-width:0}
+  .page-head .actions .btn{white-space:normal;line-height:1.3;padding:8px 10px;text-align:center}
+  .page-head .actions .inp{flex:1 1 100%}
+  .page-head .save-ind{flex:1 1 100%;order:-1;justify-content:flex-start}
+  .card-h .r{margin-left:0;width:100%}
+  .card-h .r .btn{flex:1 1 auto}
+
+  /* ---- THẺ SỐ LIỆU ---- */
+  .stat{min-height:auto;padding:11px 12px;border-radius:12px}
+  .stat .lb{padding-right:30px;font-size:11.5px;line-height:1.35}
+  .stat .vl{font-size:21px;margin-top:3px}
+  .stat .df{font-size:11px}
+  .stat .ic-box{width:26px;height:26px;right:9px;top:9px}
+
+  /* ---- BẢNG → DANH SÁCH THẺ ---- */
+  .tbl-wrap.cards{overflow-x:visible}
+  .tbl-wrap>table.as-cards,table.as-cards{min-width:0!important;width:100%}
+  .tbl-wrap:not(.cards){-webkit-overflow-scrolling:touch}
+  table.as-cards thead{display:none}
+  table.as-cards,table.as-cards tbody,table.as-cards tr,table.as-cards td{display:block;width:auto}
+  table.as-cards tr{border:1px solid var(--line);border-radius:12px;background:var(--surface);
+    margin:0 0 10px;padding:11px 13px;box-shadow:var(--shadow-1)}
+  table.as-cards tr:hover{background:var(--surface)}
+  table.as-cards tr.full-row{border:0;box-shadow:none;padding:0;background:none}
+  table.as-cards tr.full-row td{padding:0}
+  table.as-cards td{border:0;padding:5px 0;font-size:13.5px;display:flex;gap:12px;align-items:baseline;justify-content:space-between}
+  table.as-cards td[data-label]::before{content:attr(data-label);font-size:10.5px;text-transform:uppercase;
+    letter-spacing:.5px;color:var(--muted);font-weight:700;flex:none;max-width:46%;line-height:1.5}
+  table.as-cards td.cell-head{display:block;padding:0 0 8px;margin-bottom:6px;border-bottom:1px solid var(--line-2);font-size:15px}
+  table.as-cards td.cell-head .t-name{font-size:15px;white-space:normal}
+  table.as-cards td.cell-empty,table.as-cards td.cell-check{display:none}
+  table.as-cards td.cell-actions{display:block;padding-top:10px;margin-top:6px;border-top:1px solid var(--line-2)}
+  table.as-cards td.cell-actions .row-actions,table.as-cards td.cell-actions>div{opacity:1;display:flex;gap:6px;flex-wrap:wrap}
+  table.as-cards td.cell-actions .btn{flex:1 1 auto;min-height:38px}
+  table.as-cards td>div,table.as-cards td .mini-bar{text-align:right;margin-left:auto}
+  table.as-cards td.cell-head>div{text-align:left;margin-left:0}
+  table.as-cards .t-sub{white-space:normal}
+
+  /* ---- FORM & THANH LỌC ---- */
+  .toolbar{padding:10px;gap:7px}
+  .toolbar>.inp,.toolbar>select.inp{flex:1 1 100%;min-width:0}
+  .toolbar>div:last-child{flex:1 1 100%;text-align:left}
+  .inp,.btn{min-height:44px}
+  .btn.sm{min-height:36px}
+  .chip{min-height:38px;padding:8px 13px}
+  .kv{grid-template-columns:1fr;gap:2px 0}
+  .kv .k{margin-top:9px}
+  .kv .v{font-size:14px}
+  .card-b{padding:13px}
+  .card-h{padding:12px 13px}
+  .tabs{margin:0 -13px;padding:0 13px}
+  .tab{padding:11px 12px;font-size:13px}
+
+  /* ---- MODAL DẠNG BOTTOM SHEET ---- */
+  .overlay{padding:0;align-items:flex-end}
+  .modal,.modal.wide,.modal.xwide{max-width:none;max-height:92dvh;border-radius:20px 20px 0 0;animation:sheetUp .22s var(--ease)}
+  .modal::before{content:"";display:block;width:40px;height:4px;border-radius:4px;background:var(--line);
+    margin:8px auto 0;flex:none}
+  .modal-h{padding:12px 15px}
+  .modal-h h3{font-size:16px}
+  .modal-b{padding:15px;padding-bottom:calc(15px + env(safe-area-inset-bottom,0px))}
+  .modal-b .grid.g2,.modal-b .grid.g3{grid-template-columns:minmax(0,1fr)}
+  .modal-f{padding:11px 15px calc(11px + env(safe-area-inset-bottom,0px));border-radius:0;gap:8px}
+  .modal-f .btn{flex:1 1 auto;min-height:46px}
+  @keyframes sheetUp{from{transform:translateY(24px);opacity:.6}to{transform:none;opacity:1}}
+  .drawer{width:100%}
+
+  /* ---- WIZARD IMPORT ---- */
+  .steps{overflow-x:auto;flex-wrap:nowrap;margin:0 -13px 16px;padding:0 13px 6px;scrollbar-width:none}
+  .steps::-webkit-scrollbar{display:none}
+  .step{flex:none;font-size:12px}
+  .step-line{min-width:18px;margin:0 7px}
+  .dropzone{padding:26px 14px}
+
+  /* ---- HỒ SƠ 360 ---- */
+  .c360-head{padding:15px 15px 17px;border-radius:12px 12px 0 0}
+  .c360-head>div{flex-direction:column}
+  .c360-head h2{font-size:19px}
+  .c360-head .meta{gap:8px 14px;font-size:12.5px}
+  .c360-head .acts{width:100%}
+  .c360-head .acts .btn{flex:1 1 45%;min-height:42px}
+  .c360-head .kpi{text-align:left;display:flex;gap:18px;align-items:flex-end;width:100%;margin-top:14px;
+    padding-top:12px;border-top:1px solid rgba(255,255,255,.25)}
+  .c360-head .kpi .progress{width:110px!important}
+
+  /* ---- LỊCH ---- */
+  .cal-grid{grid-template-columns:46px repeat(var(--cols,1),minmax(0,1fr))}
+  .cal-time{height:48px;font-size:10px;padding-right:5px}
+  .cal-cell{height:48px}
+  .legend{display:none}
+
+  /* ---- KHÁC ---- */
+  .funnel-lb{width:88px;font-size:12px}
+  .funnel-cv{width:48px;font-size:12px}
+  .funnel-bar{height:32px}
+  .tl{padding-left:30px}
+  .tl-i .dot{left:-30px;width:24px;height:24px}
+  .queue-item{padding:11px 12px;flex-wrap:wrap}
+  .queue-item .btn{width:100%;margin-top:4px}
+  .sess{flex-wrap:wrap}
+  .empty{padding:32px 14px}
+  .bodymap svg{max-height:280px}
+  .metric-delta .to{font-size:22px}
+}
+
+/* Điện thoại nhỏ (≤380px): dồn thẻ số liệu về 1 cột */
+@media(max-width:380px){
+  .g6,.g5,.g4{grid-template-columns:minmax(0,1fr)}
+  .page-head .actions>*{flex:1 1 100%}
+  .bottom-nav a span,.bottom-nav button span{font-size:9.5px}
+}
+
+/* Máy tính bảng dọc */
+@media(min-width:768px) and (max-width:1024px){
+  .content{padding:18px}
+  .g6,.g5{grid-template-columns:repeat(3,minmax(0,1fr))}
+}
+
+/* Mobile: bỏ vùng cuộn lồng nhau (nested scroll) trong thẻ */
+@media(max-width:767px){
+  .card .card-b[style*="max-height"],
+  .card .tbl-wrap[style*="max-height"],
+  .card > div[style*="overflow-y:auto"]{max-height:none!important;overflow-y:visible!important}
 }
