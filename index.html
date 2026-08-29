@@ -1,0 +1,95 @@
+<!DOCTYPE html>
+<html lang="vi">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<meta name="color-scheme" content="light dark">
+<meta name="description" content="Phần mềm quản lý nội bộ Phòng khám Cơ xương khớp & Phục hồi chức năng Vitalife">
+<title>Vitalife Clinic Manager</title>
+<link rel="icon" href="assets/logo.png">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="styles.css?v=202608291745">
+</head>
+<body>
+<a class="skip-link" href="#view">Bỏ qua điều hướng, tới nội dung chính</a>
+
+<!-- ================= LOGIN ================= -->
+<div class="login-wrap" id="login">
+  <div class="login-art">
+    <div class="logo-chip"><img src="assets/logo.png" alt="VitaLife — Sáng y đức, vững niềm tin"></div>
+    <div>
+      <h1>Phần mềm quản lý<br>phòng khám nội bộ</h1>
+      <p>CRM · Lịch hẹn · Hồ sơ bệnh nhân · Liệu trình điều trị · Theo dõi tiến triển · Doanh thu —
+         dành riêng cho Phòng khám Cơ xương khớp &amp; Phục hồi chức năng Vitalife.</p>
+      <div class="login-feats" id="login-feats"></div>
+    </div>
+    <div class="foot" style="font-size:12px;opacity:.78">© 2026 Vitalife · Số 16 P. Thượng Đình, Khương Đình, Hà Nội · Hotline 0936.278.589<br>Dữ liệu trong bản demo là dữ liệu giả lập.</div>
+  </div>
+  <div class="login-form">
+    <main class="login-card">
+      <h2>Đăng nhập hệ thống</h2>
+      <p class="sub">Sử dụng tài khoản nội bộ được Quản trị viên cấp.</p>
+      <form onsubmit="event.preventDefault();doLogin()" novalidate>
+        <label class="fld" for="lg-email"><span class="lb">Email <span class="req" aria-hidden="true">*</span></span>
+          <input class="inp" id="lg-email" type="email" autocomplete="username" placeholder="ten@vitalife.vn" value="admin@vitalife.vn" required>
+          <div class="err" id="lg-email-err" aria-live="polite"></div></label>
+        <label class="fld" for="lg-pass"><span class="lb">Mật khẩu <span class="req" aria-hidden="true">*</span></span>
+          <input class="inp" id="lg-pass" type="password" autocomplete="current-password" value="demo1234" required></label>
+        <div style="display:flex;justify-content:space-between;align-items:center;margin:2px 0 16px;gap:12px">
+          <label style="display:flex;gap:8px;align-items:center;font-size:13px;cursor:pointer"><input type="checkbox" checked> Ghi nhớ đăng nhập</label>
+          <a href="#" style="font-size:13px;color:var(--brand);font-weight:600" onclick="event.preventDefault();toast('Liên hệ Quản trị viên để đặt lại mật khẩu','info')">Quên mật khẩu?</a>
+        </div>
+        <button class="btn primary lg block" type="submit">Đăng nhập</button>
+      </form>
+      <div class="demo-users">
+        <div class="t">Đăng nhập nhanh theo vai trò (demo)</div>
+        <div id="demo-user-list"></div>
+      </div>
+    </main>
+  </div>
+</div>
+
+<!-- ================= APP ================= -->
+<div class="app" id="app">
+  <div class="scrim" id="scrim" onclick="toggleSidebar(false)"></div>
+  <aside class="sidebar" id="sidebar" aria-label="Điều hướng chính">
+    <div class="brand"><img src="assets/logo.png" alt="VitaLife Clinic Manager"></div>
+    <nav class="nav" id="nav"></nav>
+    <div class="side-foot">Bản demo 0.9 · <span id="branch-lb">Thượng Đình</span></div>
+  </aside>
+  <div class="main">
+    <header class="header">
+      <button class="icon-btn" id="burger" aria-label="Mở menu điều hướng" onclick="toggleSidebar()"></button>
+      <div class="search" role="search">
+        <span class="si" id="search-ic"></span>
+        <label class="sr-only" for="gsearch">Tìm kiếm khách hàng, số điện thoại, mã liệu trình</label>
+        <input id="gsearch" type="search" placeholder="Tìm tên, số điện thoại, mã KH, mã liệu trình…" autocomplete="off"
+               role="combobox" aria-expanded="false" aria-controls="search-res"
+               oninput="doSearch(this.value)" onfocus="doSearch(this.value)">
+        <kbd>⌘K</kbd>
+        <div class="search-res" id="search-res" role="listbox" aria-label="Kết quả tìm kiếm"></div>
+      </div>
+      <div class="hd-right">
+        <button class="icon-btn" id="theme-btn" aria-label="Chuyển giao diện sáng/tối" onclick="toggleTheme()"></button>
+        <button class="icon-btn" id="notif-btn" aria-label="Thông báo" onclick="openNotifs()"></button>
+        <button class="user-chip" id="user-chip" aria-label="Tài khoản của bạn" onclick="openUserMenu()">
+          <span class="avatar" id="hd-avatar" aria-hidden="true">TB</span>
+          <span><span class="nm" id="hd-name">—</span><span class="rl" id="hd-role">—</span></span>
+        </button>
+      </div>
+    </header>
+    <main class="content" id="view" tabindex="-1"></main>
+  </div>
+</div>
+
+<div class="overlay" id="overlay" role="dialog" aria-modal="true" onclick="if(event.target===this)closeModal()"><div id="modal-host"></div></div>
+<div class="drawer-wrap" id="drawer" role="dialog" aria-modal="true" aria-label="Bảng thông tin"><div class="drawer-bg" onclick="closeDrawer()"></div><div class="drawer" id="drawer-body"></div></div>
+<div class="toasts" id="toasts" role="status" aria-live="polite"></div>
+
+<script src="icons.js?v=202608291745"></script>
+<script src="data.js?v=202608291745"></script>
+<script src="app.js?v=202608291745"></script>
+<script src="flows.js?v=202608291745"></script>
+</body>
+</html>
