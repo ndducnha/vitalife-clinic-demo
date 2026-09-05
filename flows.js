@@ -16,6 +16,9 @@ function downloadCSV(filename, header, rows){
 /* cfg = {title, filename, columns:[{k,lb,on}], rows:[obj], note} */
 let _exportCfg=null;
 function openExport(cfg){
+  /* Chặn ở tầng nghiệp vụ, không chỉ ẩn nút: gọi thẳng openExport()/doExport()
+     từ console cũng bị từ chối giống như server trả 403. */
+  if(!guard('data.export','Bạn không có quyền xuất dữ liệu ra file')) return;
   _exportCfg=cfg;
   modal(`<div class="modal wide"><div class="modal-h"><h3>${ic('download',18)} ${esc(cfg.title)}</h3><button class="x" aria-label="Đóng" onclick="closeModal()">${ic('x',16)}</button></div>
   <div class="modal-b">
@@ -44,6 +47,7 @@ function openExport(cfg){
     <button class="btn primary" onclick="doExport()">${ic('download',16)} Tải tệp ${cfg.rows.length} dòng</button></div></div>`);
 }
 function doExport(){
+  if(!guard('data.export','Bạn không có quyền xuất dữ liệu ra file')) return;
   const cfg=_exportCfg; if(!cfg) return;
   const idx=[...document.querySelectorAll('.ex-col:checked')].map(x=>+x.value);
   if(!idx.length) return toast('Chọn ít nhất một cột để xuất','err');
@@ -245,8 +249,11 @@ function openCustomerForm(cid, presetPhone){
       <label class="fld" for="cf-name"><span class="lb">Họ và tên <span class="req">*</span></span>
         <input class="inp" id="cf-name" value="${esc(c?c.name:'')}" placeholder="VD: Nguyễn Văn An" autocomplete="name"></label>
       <label class="fld" for="cf-phone"><span class="lb">Số điện thoại <span class="req">*</span></span>
-        <input class="inp mono" id="cf-phone" type="tel" inputmode="tel" value="${c?fmtPhone(c.phone):(presetPhone||'')}" placeholder="0912 345 678" oninput="cfCheckPhone('${cid||''}')">
-        <div class="hint" id="cf-phone-hint">Chấp nhận 0…, +84…, có dấu chấm/khoảng trắng.</div></label>
+        <input class="inp mono" id="cf-phone" type="tel" inputmode="tel" value="${c?fmtPhone(c.phone):(presetPhone||'')}" placeholder="0912 345 678"
+          ${c&&!can('customer.view_phone')?'readonly aria-readonly="true"':`oninput="cfCheckPhone('${cid||''}')"`}>
+        <div class="hint" id="cf-phone-hint">${c&&!can('customer.view_phone')
+          ?'Bạn không có quyền <span class="mono">customer.view_phone</span> — số đã được che và không thể sửa.'
+          :'Chấp nhận 0…, +84…, có dấu chấm/khoảng trắng.'}</div></label>
     </div>
     <div class="grid g3">
       <label class="fld" for="cf-dob"><span class="lb">Ngày sinh</span>
@@ -296,13 +303,19 @@ function cfCheckPhone(cid){
   else { h.className='hint'; h.innerHTML=ic('check',13)+' Chuẩn hóa: <b>'+fmtPhone(v)+'</b> · chưa tồn tại trong hệ thống.'; }
 }
 function saveCustomer(cid){
-  const name=$('#cf-name').value.trim(), phone=normPhone($('#cf-phone').value);
+  const name=$('#cf-name').value.trim();
+  /* Người không được xem SĐT chỉ thấy bản che (09******12) — giữ nguyên số gốc
+     thay vì ghi đè bằng dấu sao. */
+  const rawPhone=$('#cf-phone').value;
+  const phone = (rawPhone.includes('*') && cid) ? normPhone(custById(cid).phone) : normPhone(rawPhone);
+  const rawPhone2=$('#cf-phone2').value;
+  const phone2 = (rawPhone2.includes('*') && cid) ? normPhone(custById(cid).phone2||'') : normPhone(rawPhone2);
   const err=$('#cf-err');
   if(!name){ err.innerHTML=`<div class="alert al-err">${ic('alert',16)}<div>Vui lòng nhập họ tên.</div></div>`; $('#cf-name').focus(); return; }
   if(phone.length<9){ err.innerHTML=`<div class="alert al-err">${ic('alert',16)}<div>Số điện thoại không hợp lệ.</div></div>`; $('#cf-phone').focus(); return; }
   const dup=DB.customers.find(c=>c.id!==cid&&normPhone(c.phone)===phone);
   if(dup){ err.innerHTML=`<div class="alert al-err">${ic('alert',16)}<div>Số điện thoại đã thuộc hồ sơ <b>${esc(dup.name)}</b>. Không tạo hồ sơ trùng.</div></div>`; return; }
-  const f={name, phone, phone2:normPhone($('#cf-phone2').value), email:$('#cf-email').value.trim(),
+  const f={name, phone, phone2, email:$('#cf-email').value.trim(),
     dob:$('#cf-dob').value?new Date($('#cf-dob').value+'T00:00:00'):new Date(TODAY.getFullYear()-40,0,1),
     gender:$('#cf-gender').value, address:$('#cf-addr').value.trim(), job:$('#cf-job').value.trim(),
     contact_person:$('#cf-contact').value.trim(), source:$('#cf-src').value, campaign:$('#cf-camp').value,
@@ -423,6 +436,329 @@ function openReceipt(pid){
   <div class="modal-f"><button class="btn" onclick="closeModal()">Đóng</button>
     <button class="btn" onclick="toast('Đã gửi phiếu thu qua Zalo/SMS cho khách (demo)','ok')">${ic('mail',16)} Gửi cho khách</button>
     <button class="btn primary" onclick="window.print()">${ic('file',16)} In phiếu</button></div></div>`);
+}
+
+/* =========================================================================
+   MUA THÊM GÓI TRỊ LIỆU
+   Một khách hàng có thể có NHIỀU treatment course cùng lúc: cùng loại gói,
+   khác loại gói, hoặc cùng loại nhưng khác vùng điều trị. Hàm dưới đây chỉ
+   THÊM bản ghi mới — không đụng tới liệu trình đang chạy.
+   ========================================================================= */
+/* Sinh id không trùng kể cả khi đã có bản ghi bị xóa/thêm xen kẽ. */
+function nextId(prefix, arr, pad){
+  let max=0;
+  arr.forEach(x=>{ const m=new RegExp('^'+prefix+'(\\d+)$').exec(x.id); if(m) max=Math.max(max,+m[1]); });
+  return prefix+String(max+1).padStart(pad||4,'0');
+}
+function nextCourseId(){ return nextId('CO', DB.courses, 4); }
+function nextSessionId(){ return nextId('SE', DB.sessions, 4); }
+function courseStatusLb(st){
+  return {pending:'Chờ kích hoạt',active:'Đang điều trị',completed:'Hoàn thành',cancelled:'Đã hủy'}[st]||st;
+}
+function courseStatusColor(st){
+  return {pending:'b-amber',active:'b-teal',completed:'b-green',cancelled:'b-red'}[st]||'b-gray';
+}
+function courseRemaining(co){ return Math.max(0, co.total_sessions - co.done_sessions); }
+
+function openAddPackage(cid, suggestArea){
+  if(!guard('treatment.purchase','Bạn không có quyền tạo gói trị liệu cho khách')) return;
+  const c=custById(cid); if(!c) return;
+  const cos=custCourses(cid);
+  const openCos=cos.filter(x=>['pending','active'].includes(x.status));
+  const area = suggestArea || areaForDx(c.concern);
+  const canActivate=can('treatment.approve')||can('admin');
+  closeModal();
+  modal(`<div class="modal wide"><div class="modal-h"><h3>${ic('package',18)} Mua thêm gói trị liệu</h3>
+    <span class="badge b-gray nodot mono">${c.code}</span>
+    <button class="x" aria-label="Đóng" onclick="closeModal()">${ic('x',16)}</button></div>
+  <div class="modal-b">
+    <div class="alert al-info">${ic('info',16)}<div><b>${esc(c.name)}</b> đang có <b>${openCos.length}</b> liệu trình chưa kết thúc.
+      Gói mới được tạo <b>song song</b> — dữ liệu và tiến độ của gói cũ giữ nguyên.</div></div>
+    ${cos.length?`<div class="sec-t">Liệu trình hiện có</div>
+      <div class="card-b tight" style="max-height:150px;overflow:auto;border:1px solid var(--line);border-radius:10px;margin-bottom:12px">
+      ${cos.map(x=>`<div class="queue-item"><div style="flex:1;min-width:0">
+        <div style="font-weight:650;font-size:13px">${esc(pkgById(x.package_id).name)}</div>
+        <div class="t-sub">${x.code}${x.area?' · '+esc(x.area):''} · ${x.done_sessions}/${x.total_sessions} buổi</div></div>
+        <span class="badge ${courseStatusColor(x.status)}">${courseStatusLb(x.status)}</span></div>`).join('')}
+      </div>`:''}
+    <div class="grid g2">
+      <label class="fld" for="ap-pkg"><span class="lb">Gói / liệu trình <span class="req">*</span></span>
+        <select class="inp" id="ap-pkg" onchange="apPreview()"><option value="">— Chọn gói —</option>
+          ${DB.packages.filter(p=>p.active).map(p=>`<option value="${p.id}">${esc(p.name)} — ${money(p.price)}đ</option>`).join('')}</select>
+        <div class="hint">Được phép chọn lại đúng gói khách đang dùng (mua thêm liệu trình cùng loại).</div></label>
+      <label class="fld" for="ap-area"><span class="lb">Vùng điều trị <span class="req">*</span></span>
+        <select class="inp" id="ap-area">${TREAT_AREAS.map(a=>`<option ${a===area?'selected':''}>${a}</option>`).join('')}</select>
+        <div class="hint">Mỗi gói giữ vùng điều trị riêng.</div></label>
+    </div>
+    <div class="grid g3">
+      <label class="fld" for="ap-n"><span class="lb">Tổng số buổi</span><input class="inp" id="ap-n" type="number" min="1" max="60" oninput="apPreview()" placeholder="Theo gói"></label>
+      <label class="fld" for="ap-start"><span class="lb">Ngày bắt đầu</span><input class="inp" id="ap-start" type="date" value="${new Date(TODAY.getTime()+86400000).toISOString().slice(0,10)}" onchange="apPreview()"></label>
+      <label class="fld" for="ap-disc"><span class="lb">Giảm giá (đ)</span><input class="inp" id="ap-disc" type="number" min="0" step="100000" value="0" oninput="apPreview()"></label>
+    </div>
+    <div class="grid g2">
+      <label class="fld" for="ap-doc"><span class="lb">Bác sĩ phụ trách</span><select class="inp" id="ap-doc">
+        ${doctorList().map(u=>`<option value="${u.id}" ${cos[0]&&cos[0].doctor_id===u.id?'selected':''}>${esc(u.name)}</option>`).join('')}</select></label>
+      <label class="fld" for="ap-op"><span class="lb">OP chăm sóc</span><select class="inp" id="ap-op">
+        <option value="">— Chưa phân công —</option>
+        ${opList().map(u=>`<option value="${u.id}">${esc(u.name)}</option>`).join('')}</select></label>
+    </div>
+    <label class="fld" for="ap-dx"><span class="lb">Chẩn đoán / lý do mua thêm</span>
+      <input class="inp" id="ap-dx" list="ap-dxlist" value="${esc(c.concern||'')}">
+      <datalist id="ap-dxlist">${BENH_LY.map(n=>`<option value="${esc(n)}">`).join('')}</datalist></label>
+    <div class="sec-t">Chỉ số lượng giá theo dõi</div>
+    <div class="chips">${DB.metrics.filter(m=>m.active).map((m,i)=>`<div class="chip ${i<3?'on':''}" role="button" tabindex="0" data-apm="${m.id}"
+      onclick="this.classList.toggle('on')">${esc(m.name)}</div>`).join('')}</div>
+    <div id="ap-preview" style="margin-top:12px"></div>
+    ${canActivate?`<label class="fld" style="margin-top:10px"><span style="display:flex;gap:8px;align-items:center;font-size:13px;font-weight:600">
+      <input type="checkbox" id="ap-activate"> Kích hoạt ngay (sinh đủ số buổi, tính vào doanh thu)</span>
+      <div class="hint">Bỏ chọn để gói ở trạng thái <b>Chờ kích hoạt</b> theo đúng quy trình duyệt hiện tại.</div></label>`
+     :`<div class="alert al-warn" style="margin-top:10px">${ic('lock',16)}<div>Gói mới sẽ ở trạng thái <b>Chờ kích hoạt</b> — cần Trưởng phòng xác nhận trước khi sinh buổi điều trị.</div></div>`}
+    <label class="fld" for="ap-note"><span class="lb">Ghi chú</span><textarea class="inp" id="ap-note" rows="2" placeholder="VD: khách mua thêm gói cho vai phải, giữ nguyên liệu trình thắt lưng đang chạy"></textarea></label>
+  </div>
+  <div class="modal-f"><button class="btn" onclick="closeModal()">Hủy</button>
+    <button class="btn primary" onclick="doAddPackage('${cid}')">${ic('package',16)} Tạo gói trị liệu</button></div></div>`);
+  apPreview();
+}
+function apPreview(){
+  const box=$('#ap-preview'); if(!box) return;
+  const p=pkgById($('#ap-pkg').value);
+  if(!p){ box.innerHTML=`<div class="alert al-warn">${ic('alert',16)}<div>Chọn gói để xem trước số buổi và thành tiền.</div></div>`; return; }
+  const n=Math.max(1, parseInt($('#ap-n').value)||p.sessions);
+  const disc=Math.max(0, +$('#ap-disc').value||0);
+  const unit=p.price/p.sessions;
+  const listPrice=Math.round(unit*n);
+  const total=Math.max(0, listPrice-disc);
+  const start=$('#ap-start').value?new Date($('#ap-start').value+'T09:00:00'):new Date(TODAY.getTime()+86400000);
+  const end=new Date(start.getTime()+n*3*86400000);
+  box.innerHTML=`<div class="alert al-info" style="display:block">
+    <div style="font-weight:700;margin-bottom:6px">${esc(p.name)} · ${n} buổi × ${p.duration} phút</div>
+    <div style="font-size:12.5px;margin-bottom:6px">Dịch vụ mỗi buổi: ${p.services.map(s=>`<span class="badge b-teal nodot" style="margin:2px">${esc(s)}</span>`).join('')}</div>
+    <div class="kv"><div class="k">Bắt đầu</div><div class="v">${fmtD(start)}</div>
+      <div class="k">Dự kiến kết thúc</div><div class="v">${fmtD(end)}</div>
+      <div class="k">Giá niêm yết</div><div class="v">${money(listPrice)}đ</div>
+      <div class="k">Giảm giá</div><div class="v">${disc?'-'+money(disc)+'đ':'—'}</div>
+      <div class="k">Thành tiền</div><div class="v" style="font-size:16px;color:var(--brand-700)">${money(total)}đ</div></div></div>`;
+}
+/* Lõi nghiệp vụ: tạo THÊM một treatment course cho khách.
+   Tách khỏi DOM để kiểm thử được và để mọi nơi (quầy, hồ sơ 360, liệu trình)
+   dùng chung một đường ghi dữ liệu duy nhất. */
+function createCourse(cid, o){
+  if(!guard('treatment.purchase','Bạn không có quyền tạo gói trị liệu cho khách')) return null;
+  const c=custById(cid); if(!c) return null;
+  const p=pkgById(o.package_id); if(!p) return null;
+  const n=Math.max(1, parseInt(o.total_sessions)||p.sessions);
+  const disc=Math.max(0, +o.discount||0);
+  const listPrice=Math.round(p.price/p.sessions*n);
+  const total=Math.max(0, listPrice-disc);
+  const start=o.start_date?new Date(o.start_date):new Date(TODAY.getTime()+86400000);
+  const activate=!!o.activate && (can('treatment.approve')||can('admin'));
+  const before=custCourses(cid).map(x=>x.id);
+
+  const co={
+    id:nextCourseId(), code:'LT-'+String(2026000+DB.courses.length+1).slice(-6),
+    customer_id:cid, package_id:p.id, encounter_id:o.encounter_id||null, doctor_id:o.doctor_id||null,
+    diagnosis:(o.diagnosis||'').trim()||c.concern,
+    area:o.area||areaForDx(c.concern),
+    start_date: activate?start:null,
+    end_date_est: activate?new Date(start.getTime()+n*3*86400000):null,
+    total_sessions:n, done_sessions:0,
+    list_price:listPrice, discount:disc, total, paid:0,
+    status: activate?'active':'pending',
+    proposed_at:new Date(), proposed_by:S.user.id,
+    activated_at: activate?new Date():null, activated_by: activate?S.user.id:null,
+    op_id:o.op_id||null,
+    metrics:(o.metrics&&o.metrics.length)?o.metrics:['M1','M2','M3'],
+    note:o.note||'',
+    sold_by:S.user.id, sold_at:new Date(),
+  };
+  /* KHÔNG ghi đè liệu trình cũ — chỉ thêm bản ghi mới vào danh sách */
+  DB.courses.push(co);
+  for(let i=1;i<=n;i++){
+    DB.sessions.push({id:nextSessionId(), course_id:co.id, no:i,
+      at:(activate&&i===1)?new Date(start):null,
+      doctor_id:co.doctor_id, tech_id:null, services:p.services.slice(0,3),
+      status:(activate&&i===1)?'booked':'pending',
+      before:'',intervention:'',after:'',reaction:'',note:'',recommend:''});
+  }
+  if(activate && !['IN_TREATMENT','TREATMENT_COMPLETED'].includes(c.status)) c.status='PACKAGE_ACTIVE';
+  else if(!activate && ['NEW_LEAD','ASSIGNED','CONTACTING','CALLBACK','NO_ANSWER','INTERESTED'].includes(c.status)) c.status='TREATMENT_PROPOSED';
+  c.lifecycle='patient';
+
+  tl(cid,new Date(),'package','purple','Mua thêm gói trị liệu',
+     p.name+' · '+n+' buổi · vùng '+co.area+' · '+money(total)+'đ', S.user.name+' · '+co.code);
+  DB.timeline.sort((x,y)=>y.at-x.at);
+  au(new Date(),S.user.id,'add_package','treatment_courses',co.id,
+     'gói hiện có: '+(before.length?before.join(', '):'—'),
+     p.code+' · '+n+' buổi · '+co.area+' · '+co.status);
+  DB.audit.sort((x,y)=>y.at-x.at);
+  return co;
+}
+function doAddPackage(cid){
+  if(!$('#ap-pkg').value) return toast('Vui lòng chọn gói trị liệu','err');
+  const co=createCourse(cid,{
+    package_id:$('#ap-pkg').value,
+    area:$('#ap-area').value,
+    total_sessions:parseInt($('#ap-n').value)||0,
+    start_date:$('#ap-start').value?$('#ap-start').value+'T09:00:00':null,
+    discount:+$('#ap-disc').value||0,
+    doctor_id:$('#ap-doc').value||null,
+    op_id:$('#ap-op').value||null,
+    diagnosis:$('#ap-dx').value,
+    metrics:[...document.querySelectorAll('.chip.on[data-apm]')].map(x=>x.dataset.apm),
+    note:$('#ap-note').value.trim(),
+    activate:!!($('#ap-activate')&&$('#ap-activate').checked),
+  });
+  if(!co) return;
+  closeModal();
+  toast('Đã thêm '+co.code+' — khách hiện có '+custCourses(cid).length+' liệu trình','ok');
+  S.filters.c360tab='course'; S.filters.coSel=co.id;
+  buildNav(); render();
+}
+
+/* =========================================================================
+   IN & XUẤT PDF HỒ SƠ KHÁM BỆNH (khổ A4)
+   Bản demo là static site, không nhúng thư viện ngoài — nên PDF được tạo
+   bằng hộp thoại in của trình duyệt với đích "Save as PDF" (Lưu thành PDF).
+   Tài liệu in là một trang HTML độc lập, CSS riêng, không phụ thuộc theme
+   sáng/tối của ứng dụng để bản in luôn sạch trên giấy trắng.
+   ========================================================================= */
+function printDocument(html, title){
+  const old=document.getElementById('print-frame'); if(old) old.remove();
+  const f=document.createElement('iframe');
+  f.id='print-frame'; f.setAttribute('aria-hidden','true'); f.title=title||'Bản in';
+  f.style.cssText='position:fixed;right:0;bottom:0;width:0;height:0;border:0;visibility:hidden';
+  document.body.appendChild(f);
+  const doc=f.contentWindow.document;
+  doc.open(); doc.write(html); doc.close();
+  const go=()=>{ try{ f.contentWindow.focus(); f.contentWindow.print(); }catch(e){ toast('Trình duyệt chặn hộp thoại in','err'); } };
+  if(doc.readyState==='complete') setTimeout(go,120); else f.onload=()=>setTimeout(go,120);
+}
+const PRINT_CSS=`
+@page{size:A4;margin:14mm 14mm 16mm}
+*{box-sizing:border-box}
+body{font-family:"Be Vietnam Pro","Segoe UI",Arial,sans-serif;color:#101B24;font-size:11.5pt;line-height:1.5;margin:0;background:#fff}
+.doc{max-width:182mm;margin:0 auto}
+.lh{display:flex;gap:12px;align-items:flex-start;border-bottom:2px solid #0167B8;padding-bottom:8px;margin-bottom:12px}
+.lh img{height:34px}
+.lh .cl{font-weight:700;font-size:12pt;color:#0167B8;margin-bottom:2px}
+.lh .ad{font-size:9pt;color:#4A5B68;line-height:1.45}
+.lh .rt{margin-left:auto;text-align:right;font-size:9pt;color:#4A5B68}
+h1{font-size:15pt;text-align:center;margin:10px 0 2px;letter-spacing:.4px}
+.sub{text-align:center;font-size:9.5pt;color:#4A5B68;margin-bottom:12px}
+.pt{border:1px solid #D3DEE5;border-radius:6px;padding:9px 11px;margin-bottom:12px;background:#F7FAFC}
+.pt table{width:100%;border-collapse:collapse}
+.pt td{padding:2px 0;font-size:10.5pt;vertical-align:top}
+.pt td.k{color:#4A5B68;width:26mm;white-space:nowrap}
+.pt td.v{font-weight:600;padding-right:10px}
+section{margin-bottom:9px;page-break-inside:avoid}
+section h2{font-size:10.5pt;margin:0 0 3px;color:#0167B8;text-transform:uppercase;letter-spacing:.4px;border-bottom:1px solid #E2EAF0;padding-bottom:2px}
+section p{margin:0;white-space:pre-wrap}
+.empty{color:#8A9AA6;font-style:italic}
+.two{display:flex;gap:14px}
+.two>*{flex:1}
+.marks{font-size:10pt;margin:0;padding-left:16px}
+.pkg{border:1px solid #D3DEE5;border-radius:6px;padding:8px 10px;font-size:10.5pt;background:#F7FAFC}
+.sign{display:flex;justify-content:space-between;margin-top:18px;page-break-inside:avoid}
+.sign div{width:70mm;text-align:center;font-size:10pt}
+.sign .r{font-weight:700;margin-bottom:2px}
+.sign .n{margin-top:20mm;font-weight:700}
+.ft{margin-top:14px;border-top:1px solid #E2EAF0;padding-top:5px;font-size:8.5pt;color:#7A8B98;display:flex;justify-content:space-between}
+.wm{margin-top:8px;font-size:8.5pt;color:#A33;text-align:center}
+`;
+/* Thư mục chứa index.html — bỏ ?query và #hash để ảnh trong tài liệu in
+   tải được ở cả http:// lẫn file://. */
+function docBaseUrl(){ return location.href.split(/[?#]/)[0].replace(/[^/]*$/,''); }
+function pv(x){ return (x===null||x===undefined||String(x).trim()==='') ? '<span class="empty">(chưa ghi nhận)</span>' : esc(x); }
+
+/* Nội dung PDF lấy đúng hồ sơ bệnh nhân + đúng lần khám đang xem. */
+function encounterDocHTML(eid){
+  const e=encById(eid); if(!e) return '';
+  const c=custById(e.customer_id);
+  const co=DB.courses.find(x=>x.encounter_id===e.id);
+  const st=ENC_STATE[encState(e)];
+  const marks=(e.body_map||[]).map(m=>{
+    const bp=(DB.bodyParts.find(b=>b.id===m.part)||{name:m.part}).name;
+    const t=(BM_TYPES.find(x=>x.code===m.type)||{label:m.type}).label;
+    return '<li>'+esc(bp)+' — '+esc(t)+(m.level?' (mức '+m.level+')':'')+'</li>';
+  }).join('');
+  const secs=ENC_FIELDS.map(([k,lb])=>`<section><h2>${lb.replace(/&/g,'&amp;')}</h2><p>${pv(e[k])}</p></section>`).join('');
+  return `<!doctype html><html lang="vi"><head><meta charset="utf-8"><title>Hồ sơ khám ${e.id} — ${esc(c.name)}</title>
+<style>${PRINT_CSS}</style></head><body><div class="doc">
+  <div class="lh">
+    <img src="${docBaseUrl()}assets/logo.png" alt="" onerror="this.style.display='none'">
+    <div><div class="cl">${esc(DB.clinic.name)}</div>
+      <div class="ad">${esc(DB.clinic.address)}<br>Hotline ${esc(DB.clinic.hotline)} · ${esc(DB.clinic.email)} · MST ${esc(DB.clinic.tax)}</div></div>
+    <div class="rt">Mã hồ sơ khám<br><b>${e.id}</b><br>Phiên bản v${e.version}<br>${st.label}</div>
+  </div>
+  <h1>HỒ SƠ KHÁM BỆNH</h1>
+  <div class="sub">Chuyên khoa Cơ xương khớp &amp; Phục hồi chức năng · Ngày khám ${fmtDT(e.at)}</div>
+  <div class="pt"><table>
+    <tr><td class="k">Họ và tên</td><td class="v">${esc(c.name)}</td><td class="k">Mã khách hàng</td><td class="v">${c.code}</td></tr>
+    <tr><td class="k">Ngày sinh</td><td class="v">${fmtD(c.dob)} (${age(c.dob)} tuổi)</td><td class="k">Giới tính</td><td class="v">${c.gender==='M'?'Nam':'Nữ'}</td></tr>
+    <tr><td class="k">Điện thoại</td><td class="v">${fmtPhone(c.phone)}</td><td class="k">Nghề nghiệp</td><td class="v">${pv(c.job)}</td></tr>
+    <tr><td class="k">Địa chỉ</td><td class="v" colspan="3">${pv(c.address)}</td></tr>
+    <tr><td class="k">Bác sĩ khám</td><td class="v">${esc(userName(e.doctor_id))}</td><td class="k">Người liên hệ</td><td class="v">${pv(c.contact_person)}</td></tr>
+  </table></div>
+  ${secs}
+  <section><h2>K. Phác đồ / liệu trình đề xuất</h2>
+    ${co?`<div class="pkg"><b>${esc(pkgById(co.package_id).name)}</b> · ${co.total_sessions} buổi${co.area?' · vùng: '+esc(co.area):''}<br>
+      Mã liệu trình ${co.code} · giá trị ${money(co.total)}đ · trạng thái: ${co.status==='pending'?'chờ kích hoạt':co.status==='active'?'đang điều trị':co.status}</div>`
+     :'<p class="empty">(chưa đề xuất liệu trình)</p>'}</section>
+  <section><h2>M. Hẹn tái khám</h2><p>${pv(e.followup)}</p></section>
+  ${marks?`<section><h2>Phụ lục · Sơ đồ vùng tổn thương</h2><ul class="marks">${marks}</ul></section>`:''}
+  <div class="sign">
+    <div><div class="r">NGƯỜI BỆNH / NGƯỜI NHÀ</div><div style="font-size:9pt;color:#4A5B68">(Ký, ghi rõ họ tên)</div><div class="n">&nbsp;</div></div>
+    <div><div class="r">BÁC SĨ KHÁM BỆNH</div><div style="font-size:9pt;color:#4A5B68">(Ký, ghi rõ họ tên)</div><div class="n">${esc(userName(e.doctor_id))}</div></div>
+  </div>
+  <div class="ft"><span>${esc(DB.clinic.company)} · ${esc(DB.clinic.slogan)}</span>
+    <span>In bởi ${esc(S.user?S.user.name:'—')} · ${fmtDT(new Date())}</span></div>
+  ${e.status!=='final'?'<div class="wm">Bản nháp — bệnh án chưa được chốt. Không dùng làm chứng từ y tế chính thức.</div>':''}
+</div></body></html>`;
+}
+function printEncounter(eid){
+  const e=encById(eid); if(!e) return;
+  if(!can('medical')&&!can('admin')) return guard('medical','Bạn không có quyền xem hồ sơ khám');
+  if(!encPrintable(e)) return toast('Hãy bấm Lưu trước khi in hồ sơ','warn');
+  printDocument(encounterDocHTML(eid),'Hồ sơ khám '+eid);
+  au(new Date(),S.user.id,'print','medical_encounters',eid,'—','in hồ sơ khám (v'+e.version+')');
+  DB.audit.sort((a,b)=>b.at-a.at);
+  toast('Đã mở hộp thoại in hồ sơ '+eid,'ok');
+}
+function exportEncounterPDF(eid){
+  const e=encById(eid); if(!e) return;
+  if(!guard('data.export','Bạn không có quyền xuất hồ sơ ra file')) return;
+  if(!encPrintable(e)) return toast('Hãy bấm Lưu trước khi xuất file','warn');
+  const c=custById(e.customer_id);
+  modal(`<div class="modal"><div class="modal-h"><h3>${ic('download',18)} Xuất hồ sơ khám ra PDF</h3>
+    <button class="x" aria-label="Đóng" onclick="closeModal()">${ic('x',16)}</button></div>
+  <div class="modal-b">
+    <div class="alert al-info">${ic('info',16)}<div>Hồ sơ được dựng sẵn theo khổ <b>A4</b>, có tiêu đề phòng khám, thông tin bệnh nhân và ô ký tên.
+      Ở hộp thoại in, chọn máy in là <b>“Lưu thành PDF” / “Save as PDF”</b> rồi bấm Lưu.</div></div>
+    <div class="kv">
+      <div class="k">Bệnh nhân</div><div class="v">${esc(c.name)} · ${c.code}</div>
+      <div class="k">Lần khám</div><div class="v mono">${e.id} · ${fmtDT(e.at)}</div>
+      <div class="k">Bác sĩ</div><div class="v">${esc(userName(e.doctor_id))}</div>
+      <div class="k">Trạng thái</div><div class="v">${ENC_STATE[encState(e)].label}${e.status==='final'?' (v'+e.version+')':''}</div>
+      <div class="k">Tên tệp gợi ý</div><div class="v mono">${esc(encFileName(e,c))}</div>
+    </div>
+    ${e.status!=='final'?`<div class="alert al-warn" style="margin-top:12px">${ic('alert',16)}<div>Bệnh án <b>chưa chốt</b> — bản in sẽ được đóng dấu “Bản nháp”.</div></div>`:''}
+    <div class="alert al-warn" style="margin-top:12px">${ic('shield',16)}<div>Bản xuất chứa thông tin sức khỏe cá nhân. Hành động này được ghi vào <b>nhật ký kiểm toán</b>.</div></div>
+  </div>
+  <div class="modal-f"><button class="btn" onclick="closeModal()">Hủy</button>
+    <button class="btn primary" onclick="doExportEncounterPDF('${eid}')">${ic('file',16)} Mở hộp thoại lưu PDF</button></div></div>`);
+}
+function encFileName(e,c){
+  const slug=String(c.name).normalize('NFD').replace(/[̀-ͯ]/g,'').replace(/đ/gi,'d').replace(/[^A-Za-z0-9]+/g,'-').replace(/^-|-$/g,'');
+  return 'ho-so-kham_'+slug+'_'+e.id+'_'+fmtD(e.at).replace(/\//g,'-')+'.pdf';
+}
+function doExportEncounterPDF(eid){
+  if(!guard('data.export','Bạn không có quyền xuất hồ sơ ra file')) return;
+  const e=encById(eid); if(!e || !encPrintable(e)) return;
+  const c=custById(e.customer_id);
+  printDocument(encounterDocHTML(eid), encFileName(e,c));
+  au(new Date(),S.user.id,'export','medical_encounters',eid,'—','xuất PDF hồ sơ khám (v'+e.version+')');
+  DB.audit.sort((a,b)=>b.at-a.at);
+  closeModal(); toast('Chọn “Lưu thành PDF” trong hộp thoại in để tải tệp về','ok');
 }
 
 /* =========================================================================
@@ -684,7 +1020,7 @@ function viewAdminAssign(){
     <div class="grid g-3-2">
       <div class="card">
         <div class="card-h"><h3>Lead chờ phân bổ</h3><span class="sub">${list.length} bản ghi</span>
-          <div class="r"><button class="btn sm" onclick="exportCustomers(assignPool())">${ic('download',15)} Xuất</button></div></div>
+          <div class="r">${can('data.export')?`<button class="btn sm" onclick="exportCustomers(assignPool())">${ic('download',15)} Xuất</button>`:''}</div></div>
         <div class="toolbar">
           <input class="inp" style="min-width:200px" placeholder="Tìm tên / SĐT…" value="${esc(f.q)}"
                  oninput="S.assign.q=this.value;clearTimeout(window._t);window._t=setTimeout(render,300)">
@@ -846,12 +1182,15 @@ const PERM_GROUPS=[
   {g:'CRM & Lead', items:[['leads','Xem lead marketing'],['leads.import','Import lead từ Excel'],
     ['leads.assign','Phân bổ lead cho Telesales'],['customers','Xem hồ sơ khách hàng'],
     ['customers.edit_admin','Sửa thông tin hành chính']]},
+  {g:'Dữ liệu nhạy cảm', items:[['customer.view_phone','Xem đầy đủ số điện thoại khách hàng'],
+    ['data.export','Xuất dữ liệu ra file (CSV / PDF)']]},
   {g:'Telesales', items:[['telesales','Danh sách gọi của tôi'],['telesales.all','Xem lead của toàn bộ nhân viên']]},
   {g:'Lịch & Tiếp đón', items:[['calendar','Xem lịch phòng khám'],['calendar.book','Đặt / đổi lịch hẹn'],
     ['reception','Quầy tiếp đón, check-in/out']]},
   {g:'Y khoa', items:[['doctor','Hàng chờ bác sĩ'],['medical','Xem &amp; ghi hồ sơ khám'],
     ['medical.finalize','Chốt bệnh án'],['patients','Danh sách bệnh nhân']]},
   {g:'Điều trị', items:[['treatment','Xem liệu trình'],['treatment.propose','Đề xuất liệu trình'],
+    ['treatment.purchase','Bán / thêm gói trị liệu cho khách'],
     ['treatment.approve','Duyệt &amp; kích hoạt liệu trình'],['treatment.sessions','Ghi nhận buổi điều trị']]},
   {g:'CSKH', items:[['op','Bảng chăm sóc khách hàng']]},
   {g:'Tài chính', items:[['payments','Thu tiền, tạo phiếu thu'],['payments.read','Chỉ xem giao dịch'],
@@ -865,8 +1204,10 @@ function viewAdminRoles(){
     'Ma trận phân quyền được kiểm tra ở <b>tầng máy chủ và Row-Level Security</b>, không chỉ ẩn menu ở giao diện.',
     `<button class="btn" onclick="location.hash='#/admin/users'">${ic('users',16)} Người dùng</button>
      <button class="btn primary" onclick="savePerms()">${ic('check',16)} Lưu ma trận quyền</button>`)
-  + `<div class="alert al-warn">${ic('shield',16)}<div>Thay đổi quyền có hiệu lực với <b>phiên đăng nhập kế tiếp</b> của nhân viên và được ghi vào nhật ký kiểm toán.
+  + `<div class="alert al-warn">${ic('shield',16)}<div>Thay đổi quyền có hiệu lực <b>ngay lập tức</b> trong bản demo và được ghi vào nhật ký kiểm toán.
       Vai trò <b>Admin</b> luôn có toàn quyền và không thể bỏ chọn.</div></div>
+    <div class="alert al-info">${ic('eye',16)}<div><b>customer.view_phone</b> — không có quyền thì số điện thoại bị che ở mọi màn hình, bản xuất và kết quả tìm kiếm (VD <span class="mono">09******12</span>).<br>
+      <b>data.export</b> — không có quyền thì nút xuất bị ẩn <i>và</i> hàm xuất bị từ chối ở tầng nghiệp vụ.</div></div>
     <div class="card"><div class="tbl-wrap"><table class="no-cards" style="min-width:1100px">
       <thead><tr><th style="min-width:280px">Quyền</th>${roles.map(r=>`<th class="t-center"><span class="badge ${r.color} nodot">${r.name}</span></th>`).join('')}</tr></thead>
       <tbody>${PERM_GROUPS.map(g=>`
@@ -1007,7 +1348,7 @@ function drillCampaign(cpid){
         <td class="t-right">${co?money(co.paid)+'đ':'—'}</td></tr>`;}).join('')}</tbody></table></div>
   </div>
   <div class="modal-f"><button class="btn" onclick="closeModal()">Đóng</button>
-    <button class="btn primary" onclick="closeModal();exportCustomers(DB.customers.filter(c=>c.campaign==='${cpid}'))">${ic('download',16)} Xuất danh sách lead</button></div></div>`);
+    ${can('data.export')?`<button class="btn primary" onclick="closeModal();exportCustomers(DB.customers.filter(c=>c.campaign==='${cpid}'))">${ic('download',16)} Xuất danh sách lead</button>`:''}</div></div>`);
 }
 function drillRevenue(kind, key){
   let pays=[];
@@ -1029,7 +1370,7 @@ function drillRevenue(kind, key){
         ||`<tr><td colspan="7"><div class="empty"><div class="t">Chưa có giao dịch</div></div></td></tr>`}</tbody></table></div>
   </div>
   <div class="modal-f"><button class="btn" onclick="closeModal()">Đóng</button>
-    <button class="btn primary" onclick="closeModal();exportPayments(${JSON.stringify(pays.map(p=>p.id))}.map(id=>DB.payments.find(x=>x.id===id)))">${ic('download',16)} Xuất giao dịch</button></div></div>`);
+    ${can('data.export')?`<button class="btn primary" onclick="closeModal();exportPayments(${JSON.stringify(pays.map(p=>p.id))}.map(id=>DB.payments.find(x=>x.id===id)))">${ic('download',16)} Xuất giao dịch</button>`:''}</div></div>`);
 }
 
 /* =========================================================================
@@ -1190,12 +1531,24 @@ function wiCommon(c){
       <label class="fld" for="wi-need"><span class="lb">Lý do đến khám</span>
         <select class="inp" id="wi-need">${NHU_CAU.map(n=>`<option ${c&&c.need===n?'selected':''}>${n}</option>`).join('')}</select></label>
       <label class="fld" for="wi-doc"><span class="lb">Bác sĩ</span>
-        <select class="inp" id="wi-doc">${DOCTORS.map(u=>`<option value="${u.id}">${u.name}</option>`).join('')}</select></label>
+        <select class="inp" id="wi-doc"><option value="">— Chưa chỉ định —</option>
+          ${doctorList().map(u=>`<option value="${u.id}">${esc(u.name)}</option>`).join('')}</select></label>
       <label class="fld" for="wi-room"><span class="lb">Phòng</span>
-        <select class="inp" id="wi-room">${DB.rooms.filter(r=>r.type==='exam').map(r=>`<option value="${r.id}">${r.name}</option>`).join('')}</select></label>
+        <select class="inp" id="wi-room">${DB.rooms.map(r=>`<option value="${r.id}">${esc(r.name)}</option>`).join('')}</select></label>
+    </div>
+    <div class="grid g3">
+      <label class="fld" for="wi-tech"><span class="lb">Kỹ thuật viên</span>
+        <select class="inp" id="wi-tech"><option value="">— Chưa chỉ định —</option>
+          ${techList().map(u=>`<option value="${u.id}">${esc(u.name)}</option>`).join('')}</select></label>
+      <label class="fld" for="wi-consultant"><span class="lb">Tư vấn viên</span>
+        <select class="inp" id="wi-consultant"><option value="">— Chưa chỉ định —</option>
+          ${consultantList().map(u=>`<option value="${u.id}" ${c&&c.assigned_to===u.id?'selected':''}>${esc(u.name)}</option>`).join('')}</select></label>
+      <label class="fld" for="wi-flow"><span class="lb">Luồng tiếp đón</span>
+        <select class="inp" id="wi-flow">${Object.entries(VISIT_FLOW).map(([k,v])=>`<option value="${k}">${v.label}</option>`).join('')}</select></label>
     </div>`;
 }
 function doWalkIn(){
+  if(!guard('reception','Chỉ Lễ tân / Quản trị được tiếp nhận khách vãng lai')) return;
   const phone=normPhone($('#wi-phone').value);
   if(phone.length<9) return toast('Nhập số điện thoại hợp lệ','err');
   let c=window._wiCust?custById(window._wiCust):null;
@@ -1215,12 +1568,19 @@ function doWalkIn(){
     au(new Date(),S.user.id,'create','customers',c.id,'—',c.name+' · walk-in');
   }
   const at=new Date();
-  const a=addAppt({customer_id:c.id, at, status:'waiting', doctor:$('#wi-doc').value, room:$('#wi-room').value,
-    type:'Khám lần đầu (walk-in)', booked_by:S.user.id, checkin_at:at});
+  const flow=($('#wi-flow')||{value:'doctor'}).value;
+  const a=addAppt({customer_id:c.id, at, status:'waiting', doctor:$('#wi-doc').value||null, room:$('#wi-room').value,
+    technician_id:($('#wi-tech')||{value:''}).value||null, consultant_id:($('#wi-consultant')||{value:''}).value||null,
+    flow, reason:$('#wi-need').value,
+    type:'Khám lần đầu (walk-in)', booked_by:S.user.id, checkin_at:at, checkin_by:S.user.id});
   DB.appointments.sort((x,y)=>x.at-y.at);
-  c.status='WAITING_DOCTOR'; c.lifecycle='patient';
-  tl(c.id,at,'checkCircle','green','Lễ tân tiếp nhận khách vãng lai và check-in',
-     (DB.rooms.find(r=>r.id===a.room)||{name:''}).name+' · '+userName(a.doctor), S.user.name);
+  c.lifecycle='patient';
+  if(flow==='doctor') c.status='WAITING_DOCTOR';
+  else if(!['IN_TREATMENT','PACKAGE_ACTIVE','TREATMENT_COMPLETED'].includes(c.status)) c.status='CHECKED_IN';
+  au(new Date(),S.user.id,'checkin','appointments',a.id,'—',
+     JSON.stringify({flow, doctor:a.doctor, technician_id:a.technician_id, consultant_id:a.consultant_id, walkin:true}));
+  tl(c.id,at,'checkCircle','green','Lễ tân tiếp nhận khách vãng lai và check-in ('+VISIT_FLOW[flow].label+')',
+     (DB.rooms.find(r=>r.id===a.room)||{name:''}).name+(visitStaffLine(a)?' · '+visitStaffLine(a):''), S.user.name);
   DB.timeline.sort((x,y)=>y.at-x.at); DB.audit.sort((x,y)=>y.at-x.at);
   closeModal(); toast(c.name+' đã được tiếp nhận và đưa vào hàng chờ bác sĩ','ok'); initChrome(); buildNav(); render();
 }

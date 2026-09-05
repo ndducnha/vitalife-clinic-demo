@@ -119,6 +119,16 @@ const DOCTORS = DB.users.filter(u=>u.roles.includes('doctor'));
 const TECHS = DB.users.filter(u=>u.roles.includes('tech'));
 const OPS = DB.users.filter(u=>u.roles.includes('op'));
 
+/* Danh sách nhân sự theo vai trò — tính động từ DB.users (không hard-code, luôn
+   phản ánh nhân sự vừa được import/khóa). Dùng cho mọi dropdown chọn người. */
+function staffByRole(){ const rs=[].slice.call(arguments);
+  return DB.users.filter(u=>u.active!==false && u.roles.some(r=>rs.includes(r))); }
+function doctorList(){ return staffByRole('doctor'); }
+function techList(){ return staffByRole('tech'); }
+/* "Tư vấn viên" tại phòng khám = nhân sự Telesales / CSKH (OP). */
+function consultantList(){ return staffByRole('telesales','op'); }
+function opList(){ return staffByRole('op'); }
+
 /* ---------- STATUS MACHINE ---------- */
 DB.statuses = {
   NEW_LEAD:{label:'Lead mới',color:'b-gray',stage:'lead'},
@@ -151,8 +161,8 @@ DB.transitions = {
   APPOINTMENT_BOOKED:['ARRIVED','NO_SHOW','CANCELLED'],
   NO_SHOW:['CONTACTING','APPOINTMENT_BOOKED','NOT_INTERESTED'],
   ARRIVED:['CHECKED_IN','CANCELLED'],
-  CHECKED_IN:['WAITING_DOCTOR'],
-  WAITING_DOCTOR:['IN_EXAMINATION'],
+  CHECKED_IN:['WAITING_DOCTOR','IN_EXAMINATION','IN_TREATMENT','TREATMENT_COMPLETED','CANCELLED'],
+  WAITING_DOCTOR:['IN_EXAMINATION','IN_TREATMENT','TREATMENT_COMPLETED'],
   IN_EXAMINATION:['TREATMENT_PROPOSED','TREATMENT_COMPLETED'],
   TREATMENT_PROPOSED:['PACKAGE_PENDING','NOT_INTERESTED'],
   PACKAGE_PENDING:['PACKAGE_ACTIVE','CANCELLED'],
@@ -220,7 +230,15 @@ function normPhone(p){
   if(!s.startsWith('0') && s.length===9) s='0'+s;
   return s;
 }
-function fmtPhone(p){ p=normPhone(p); return p.length===10 ? p.slice(0,4)+' '+p.slice(4,7)+' '+p.slice(7) : p; }
+function fmtPhoneRaw(p){ p=normPhone(p); return p.length===10 ? p.slice(0,4)+' '+p.slice(4,7)+' '+p.slice(7) : p; }
+/* Che số điện thoại khi người dùng không có quyền customer.view_phone.
+   can() nằm ở app.js (nạp sau data.js) nên phải kiểm tra typeof trước khi gọi. */
+function hasPerm(p){ return typeof can==='function' ? can(p) : false; }
+function maskPhone(p){ p=normPhone(p); if(!p) return '—';
+  return p.length<=4 ? '*'.repeat(p.length) : p.slice(0,2)+'*'.repeat(p.length-4)+p.slice(-2); }
+/* Điểm hiển thị số điện thoại DUY NHẤT của toàn hệ thống — mọi bảng, hồ sơ,
+   kết quả tìm kiếm và bản xuất file đều đi qua đây nên chỉ cần chặn một chỗ. */
+function fmtPhone(p){ return hasPerm('customer.view_phone') ? fmtPhoneRaw(p) : maskPhone(p); }
 
 /* ---------- GENERATE CUSTOMERS ---------- */
 DB.customers = [];
@@ -321,6 +339,7 @@ const APPT_ST = {
   arrived:{label:'Đã đến',color:'b-teal',cls:'ap-teal'},
   waiting:{label:'Đang chờ',color:'b-amber',cls:'ap-amber'},
   in_exam:{label:'Đang khám',color:'b-blue',cls:'ap-blue'},
+  in_treatment:{label:'Đang trị liệu',color:'b-pink',cls:'ap-pink'},
   done:{label:'Hoàn thành',color:'b-green',cls:'ap-green'},
   no_show:{label:'Không đến',color:'b-red',cls:'ap-red'},
   cancelled:{label:'Hủy',color:'b-gray',cls:'ap-gray'},
@@ -331,7 +350,11 @@ const apCls   = s => (APPT_ST[s]||{cls:'ap-gray'}).cls;
 
 DB.appointments = [];
 let apId=1;
-function addAppt(o){ const a=Object.assign({id:'AP'+String(apId++).padStart(4,'0'),branch:'B1',type:'Khám lần đầu',room:'R1',note:''},o); DB.appointments.push(a); return a; }
+/* Một lần khách đến phòng khám = MỘT bản ghi visit (appointment) duy nhất.
+   Lễ tân, bác sĩ, KTV và quầy check-out cùng đọc/ghi trên bản ghi này —
+   không nhân bản record để khách xuất hiện ở nhiều màn hình. */
+function addAppt(o){ const a=Object.assign({id:'AP'+String(apId++).padStart(4,'0'),branch:'B1',type:'Khám lần đầu',room:'R1',note:'',
+  technician_id:null, consultant_id:null, flow:null, reason:''},o); DB.appointments.push(a); return a; }
 
 /* hôm nay: dày lịch cho lễ tân */
 const todayPlan = [
@@ -392,6 +415,18 @@ const SYMPTOM_BY_SITE = {
   shoulder_r:'Khó giơ tay quá đầu, đau khi nằm nghiêng bên phải.',
   knee_l:'Lục khục khi lên xuống cầu thang, cứng khớp buổi sáng khoảng 15 phút.',
 };
+/* Vùng điều trị của một gói trị liệu — một khách có thể mua nhiều gói cho
+   nhiều vùng khác nhau, mỗi gói giữ vùng riêng. */
+const TREAT_AREAS = ['Cột sống thắt lưng','Cột sống cổ - vai gáy','Khớp vai','Khớp gối','Khớp háng',
+  'Cổ tay - bàn tay','Cổ chân - bàn chân','Sau phẫu thuật','Toàn thân','Khác'];
+const AREA_BY_PART = {lumbar:'Cột sống thắt lưng', back:'Cột sống thắt lưng', neck:'Cột sống cổ - vai gáy',
+  shoulder_l:'Khớp vai', shoulder_r:'Khớp vai', knee_l:'Khớp gối', knee_r:'Khớp gối',
+  hip_l:'Khớp háng', hip_r:'Khớp háng', wrist_l:'Cổ tay - bàn tay', wrist_r:'Cổ tay - bàn tay',
+  hand_l:'Cổ tay - bàn tay', hand_r:'Cổ tay - bàn tay', ankle_l:'Cổ chân - bàn chân',
+  ankle_r:'Cổ chân - bàn chân', foot_l:'Cổ chân - bàn chân', foot_r:'Cổ chân - bàn chân'};
+function areaForDx(dx){ const st=(typeof DX_SITE!=='undefined'&&DX_SITE[dx])||null;
+  return (st && AREA_BY_PART[st[1]]) || 'Khác'; }
+
 const DX_SITE = {
   'Thoát vị đĩa đệm L4-L5':['vùng thắt lưng','lumbar','cạnh sống L4-L5','Lasègue (+) 45°','MRI cột sống thắt lưng: thoát vị đĩa đệm L4-L5 chèn ép rễ trái.'],
   'Đau thắt lưng mạn tính':['vùng thắt lưng','lumbar','cạnh sống L4-L5','Lasègue (-)','X-quang cột sống thắt lưng: thoái hóa, hẹp khe đĩa đệm L4-L5.'],
@@ -410,7 +445,9 @@ function mkEncounter(c, at, doctor, dxIn){
   const site = DX_SITE[dx] || ['vùng thắt lưng','lumbar','cạnh sống L4-L5','Lasègue (+) 45°','X-quang: thoái hóa cột sống.'];
   return {
     id:'EN'+String(enId++).padStart(4,'0'), customer_id:c.id, doctor_id:doctor, at,
-    status:'final', version:1,
+    /* status: draft (nháp) | final (đã chốt bệnh án)
+       saved_at = null  -> "Chưa lưu"; có giá trị -> "Đã lưu"; finalized_at -> "Đã chốt" */
+    status:'final', version:1, saved_at:at, finalized_at:at,
     reason: 'Đau '+site[0]+' kéo dài '+ri(2,18)+' '+pick(['tuần','tháng']),
     symptoms: 'Đau âm ỉ tại '+site[0]+', tăng khi vận động và về đêm. '+(SYMPTOM_BY_SITE[site[1]]||'Cứng khớp buổi sáng khoảng 20 phút.'),
     history: 'Khởi phát sau '+pick(['bê vác nặng','ngồi làm việc kéo dài','tai nạn sinh hoạt','tập gym sai tư thế'])+'. Đã dùng giảm đau NSAIDs, đỡ ít, tái phát.',
@@ -468,7 +505,7 @@ courseSpecs.forEach((spec,idx)=>{
     id:'CO'+String(coId++).padStart(4,'0'),
     code:'LT-'+String(2026000+coId).slice(-6),
     customer_id:c.id, package_id:pkg.id, encounter_id:enc.id, doctor_id:doctor,
-    diagnosis: enc.diagnosis,
+    diagnosis: enc.diagnosis, area: areaForDx(enc.diagnosis),
     start_date: spec.status==='pending'?null:start,
     end_date_est: spec.status==='pending'?null:new Date(start.getTime()+pkg.sessions*3*86400000),
     total_sessions: pkg.sessions, done_sessions: spec.done,

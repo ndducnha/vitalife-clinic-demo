@@ -7,6 +7,123 @@ Phòng khám Cơ xương khớp & Phục hồi chức năng Vitalife.
 > (Next.js App Router + TypeScript + Tailwind + shadcn/ui + Supabase).
 > Toàn bộ dữ liệu là **giả lập trong trình duyệt** — không có backend, không có dữ liệu bệnh nhân thật.
 
+## Cập nhật mới (bản 1.0)
+
+Năm nhóm chức năng bổ sung, dựng trên đúng kiến trúc/design system sẵn có — không viết lại, không đổi framework.
+
+### 1. Hồ sơ khám bệnh: Lưu · In · Xuất PDF
+
+Thanh hành động: `[trạng thái] [Lưu] [In hồ sơ] [Xuất PDF] [Chốt bệnh án] [Hồ sơ 360°] [Hàng chờ]`
+
+Ba trạng thái rõ ràng, hiển thị bằng một badge duy nhất trên đầu màn hình:
+
+| Trạng thái | Điều kiện | Ý nghĩa |
+|---|---|---|
+| **Chưa lưu** | `saved_at = null` hoặc đang có sửa đổi | Bác sĩ gõ nhưng chưa bấm Lưu |
+| **Đã lưu** | `saved_at` có giá trị, không còn sửa đổi | Đóng màn hình mở lại vẫn còn, **sửa tiếp được**, in/xuất được |
+| **Đã chốt bệnh án** | `status = final`, có `finalized_at` | Chỉ đọc; muốn sửa phải tạo phiên bản v+1 (logic cũ **giữ nguyên**) |
+
+**In / Xuất PDF** chỉ bật sau khi đã lưu. Tài liệu in là một trang HTML độc lập
+(`encounterDocHTML`) với CSS riêng `@page size:A4`, không phụ thuộc theme sáng/tối, gồm:
+tiêu đề phòng khám + logo · khối thông tin bệnh nhân · đủ mục A→M của **đúng lần khám đang xem** ·
+phụ lục sơ đồ vùng tổn thương · ô ký tên bệnh nhân và bác sĩ · chân trang ghi người in.
+Bệnh án chưa chốt được đóng dấu *“Bản nháp”*.
+
+Vì demo là static site không nhúng thư viện ngoài, **PDF tạo bằng hộp thoại in của trình duyệt**
+(chọn đích *Lưu thành PDF*) — hộp thoại có nêu rõ hướng dẫn và tên tệp gợi ý.
+
+### 2. Mua thêm gói trị liệu
+
+Nút **＋ Mua thêm gói** ở header hồ sơ 360°, tab *Liệu trình* và trang liệu trình.
+Một khách có **nhiều treatment course song song** — cùng loại gói, khác loại, hoặc cùng loại cho **vùng khác**.
+Gói mới chỉ được `push` thêm, **không ghi đè** gói đang chạy (`createCourse()` là đường ghi duy nhất).
+
+Mỗi gói giữ riêng: loại gói · **vùng điều trị** (`area`) · ngày bắt đầu · ngày dự kiến kết thúc ·
+tổng buổi · đã dùng · còn lại · trạng thái · giá/giảm giá/công nợ · lịch sử từng buổi.
+
+Tab *Liệu trình* có **bộ chip chuyển gói**; chọn gói nào thì xem lịch sử buổi và thẻ tóm tắt của gói đó.
+Trang `#/treatment/[id]` cũng có dải chip chuyển nhanh sang các gói khác của cùng khách.
+
+Mặc định gói mới ở trạng thái **Chờ kích hoạt** đúng quy trình duyệt hiện tại; ai có `treatment.approve`
+mới thấy tuỳ chọn *Kích hoạt ngay*.
+
+### 3. Hai quyền mới trong ma trận Vai trò & quyền
+
+| Quyền | Không có quyền | Có quyền |
+|---|---|---|
+| `customer.view_phone` | SĐT bị che ở **mọi** màn hình, kết quả tìm kiếm và bản xuất (`09******53`); nút gọi bị khoá; ô SĐT trong form chuyển chỉ đọc | Xem và sửa số đầy đủ |
+| `data.export` | Ẩn toàn bộ nút xuất **và** `openExport()`/`doExport()` từ chối ngay cả khi gọi thẳng từ console (ghi `denied` vào audit) | Xuất CSV/PDF như hiện tại |
+
+Che số điện thoại làm tại **một điểm duy nhất** — hàm `fmtPhone()` trong `data.js` — nên mọi bảng,
+hồ sơ, tìm kiếm và bản xuất đều tự động tuân thủ, không thể quên chỗ nào. Dữ liệu gốc trong DB không đổi.
+
+Thêm quyền `treatment.purchase` (bán/thêm gói trị liệu). Cả ba quyền đều bật/tắt được theo từng vai trò
+trong `#/admin/roles` như các quyền cũ.
+
+**Mặc định** (chỉnh được trong ma trận): `customer.view_phone` cấp cho Telesales, Lễ tân, OP, Bác sĩ;
+`data.export` cấp cho Marketing, Telesales, Lễ tân, Bác sĩ, Trưởng phòng. KTV không có cả hai —
+dùng tài khoản KTV để kiểm chứng nhanh.
+
+### 4. Tiếp đón: một visit, hai luồng
+
+Check-in xong khách xuất hiện **đồng thời** ở hàng chờ bác sĩ **và** danh sách chờ check-out,
+trên **cùng một bản ghi visit** (`DB.appointments`) — không nhân bản record.
+
+```
+FLOW A   Check-in → Bác sĩ khám → Điều trị → Check-out
+FLOW B   Check-in → Điều trị trực tiếp → Check-out
+```
+
+Lễ tân chọn luồng ngay trên form check-in. Trạng thái visit thêm `in_treatment`; nhóm
+`waiting · in_exam · in_treatment` = *đang có mặt*, đều check-out được. Bác sĩ thấy toàn bộ khách đã
+check-in kèm cột **Luồng**; khách chọn trị liệu trực tiếp xếp cuối danh sách để bác sĩ chủ động bỏ qua.
+
+Màn *Tiếp đón* có thêm thẻ **Chờ check-out** (mọi khách đang có mặt) và nút **Trị liệu** để đẩy khách
+sang trị liệu mà không cần qua bác sĩ.
+
+### 5. Form check-in: Kỹ thuật viên & Tư vấn viên
+
+Thêm hai dropdown **Kỹ thuật viên** và **Tư vấn viên**, lấy động từ `DB.users`
+(`techList()` = vai trò `tech`; `consultantList()` = `telesales` + `op`) — nhân sự vừa import từ Excel
+xuất hiện ngay, không hard-code. Cả hai nullable.
+
+Lưu vào chính bản ghi visit (`technician_id`, `consultant_id`) cùng bác sĩ, phòng, lý do khám và luồng;
+mở lại visit hiển thị đúng. Đổi được sau check-in qua nút **Nhân sự** (có ghi audit).
+Form khách vãng lai cũng có đủ các trường này.
+
+### Thay đổi dữ liệu (in-memory, tương đương migration)
+
+| Bảng | Cột thêm |
+|---|---|
+| `appointments` (visit) | `technician_id`, `consultant_id`, `flow`, `reason`, `checkin_by`, `checkout_by`, `treat_start` |
+| `medical_encounters` | `saved_at`, `finalized_at` |
+| `treatment_courses` | `area`, `sold_by`, `sold_at` |
+| trạng thái lịch hẹn | thêm `in_treatment` |
+| state machine khách | `CHECKED_IN` / `WAITING_DOCTOR` mở thêm nhánh sang `IN_TREATMENT` |
+
+Tất cả đều là cột **thêm mới, nullable** — dữ liệu seed cũ vẫn đọc được bình thường.
+
+### Nhật ký kiểm toán
+
+Ghi thêm: `save` / `print` / `export` hồ sơ khám · `add_package` · `checkin` / `checkout` /
+`treatment_start` / `exam_start` · `change_technician` / `change_consultant` / `change_doctor` ·
+`denied` (mọi lần bị từ chối vì thiếu quyền). Log chứa người thực hiện, thời gian, hành động,
+entity + id, giá trị trước/sau. Số điện thoại trong log đã qua `fmtPhone()` nên không lộ dữ liệu thô.
+
+### Kiểm thử
+
+```bash
+npx serve demo         # rồi mở http://localhost:3000/index.html?test=1
+```
+
+`tests.js` chạy 10 kịch bản bám đúng tiêu chí nghiệm thu (lưu bệnh án · nội dung PDF ·
+nhiều gói song song · che SĐT · chặn export ở tầng nghiệp vụ · check-in hiện ở 2 danh sách ·
+không sinh visit trùng · luồng không qua bác sĩ · lưu KTV/TVV · **render toàn bộ 22 route × 8 vai trò
+không lỗi**). Kết quả hiện ở route `#/tests`, chi tiết in ra console. Test chạy trên dữ liệu trong
+bộ nhớ — F5 để về seed ban đầu.
+
+---
+
 ## Hệ thống thiết kế (design system)
 
 Xây theo skill **ui-ux-pro-max** — pattern *Data-Dense Dashboard*, nhận diện lấy trực tiếp từ `logo.png`
@@ -190,7 +307,9 @@ demo/
   data.js       # dữ liệu giả lập + helper (chuẩn hóa SĐT, tiền, ngày, state machine)
   app.js        # router hash, RBAC, 20+ view, biểu đồ SVG tự vẽ (line/bar/donut)
   flows.js      # xuất Excel, tệp y khoa, CRUD khách hàng, import nhân sự,
-                # phân bổ lead, ma trận quyền, cấu hình, drill-down, phiếu thu
+                # phân bổ lead, ma trận quyền, cấu hình, drill-down, phiếu thu,
+                # in/xuất PDF hồ sơ khám, mua thêm gói trị liệu
+  tests.js      # 10 kịch bản kiểm thử nghiệp vụ (mở ?test=1 hoặc route #/tests)
   assets/
     logo.png    # logo chính thức VitaLife
 ```

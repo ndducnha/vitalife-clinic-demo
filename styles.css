@@ -689,3 +689,24 @@ tr.row-link:focus-visible{outline:2px solid var(--ring);outline-offset:-2px}
   .card .tbl-wrap[style*="max-height"],
   .card > div[style*="overflow-y:auto"]{max-height:none!important;overflow-y:visible!important}
 }
+
+/* ---- Bổ sung: luồng tiếp đón, gói trị liệu, trạng thái hồ sơ khám ---- */
+.ap-pink{background:var(--pink-bg);border-color:var(--pink);color:var(--pink)}
+/* Nhóm trường không phải <label> (VD nhóm chip chọn luồng) dùng chung style nhãn */
+div.fld{display:block;margin-bottom:13px}
+div.fld>.lb{display:block;font-size:12.5px;font-weight:650;margin-bottom:5px;color:var(--ink-2)}
+div.fld>.lb .req{color:var(--danger)}
+.queue-item .q-acts{display:flex;gap:6px;flex-wrap:wrap;flex:none}
+.badge svg{vertical-align:-2px}
+.save-ind svg{flex:none}
+@media(max-width:767px){
+  .queue-item{flex-wrap:wrap}
+  .queue-item .q-acts{width:100%;margin-top:6px}
+  .queue-item .q-acts .btn{width:auto;flex:1 1 46%;min-height:44px;margin-top:0}
+  .page-head .actions{width:100%}
+  .page-head .actions .btn{flex:1 1 auto;min-height:44px}
+}
+/* Bản in: chỉ giữ nội dung chính, ẩn toàn bộ chrome của ứng dụng */
+@media print{
+  .bottom-nav,.toasts,.overlay,.drawer-wrap,.skip-link,#print-frame{display:none !important}
+}

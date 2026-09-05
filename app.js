@@ -10,12 +10,12 @@ const initials = n => n.split(' ').filter(w=>!/^(BS\.|KTV\.)$/.test(w)).slice(-2
    Quyền cha KHÔNG tự động cấp quyền con (VD: có 'leads' không đồng nghĩa được 'leads.assign'). */
 const PERMS = {
   admin:['*'],
-  marketing:['dashboard','leads','leads.import','customers','customers.read','reports','reports.marketing','calendar','calendar.read'],
-  telesales:['dashboard','telesales','customers','customers.read','calendar','calendar.book','calendar.read','leads.read'],
-  op:['dashboard','op','customers','customers.read','calendar','calendar.book','calendar.read','treatment','treatment.read'],
-  reception:['dashboard','reception','calendar','calendar.book','calendar.read','customers','customers.read','customers.edit_admin','payments'],
-  doctor:['dashboard','doctor','customers','customers.read','medical','medical.finalize','treatment','treatment.propose','treatment.sessions','calendar','calendar.read','patients'],
-  manager:['dashboard','treatment','treatment.approve','treatment.read','reports','reports.marketing','customers','customers.read','calendar','calendar.read','payments.read'],
+  marketing:['dashboard','leads','leads.import','customers','customers.read','reports','reports.marketing','calendar','calendar.read','data.export'],
+  telesales:['dashboard','telesales','customers','customers.read','calendar','calendar.book','calendar.read','leads.read','customer.view_phone','data.export'],
+  op:['dashboard','op','customers','customers.read','calendar','calendar.book','calendar.read','treatment','treatment.read','treatment.purchase','customer.view_phone'],
+  reception:['dashboard','reception','calendar','calendar.book','calendar.read','customers','customers.read','customers.edit_admin','payments','treatment.purchase','customer.view_phone','data.export'],
+  doctor:['dashboard','doctor','customers','customers.read','medical','medical.finalize','treatment','treatment.propose','treatment.sessions','calendar','calendar.read','patients','customer.view_phone','data.export'],
+  manager:['dashboard','treatment','treatment.approve','treatment.read','treatment.purchase','reports','reports.marketing','customers','customers.read','calendar','calendar.read','payments.read','data.export'],
   tech:['dashboard','treatment','treatment.sessions','treatment.read','customers.read','calendar','calendar.read'],
 };
 function can(p){
@@ -25,6 +25,17 @@ function can(p){
     return list.includes('*') || list.includes(p) ||
            list.some(x=>x.endsWith('.*') && p.startsWith(x.slice(0,-1)));
   });
+}
+/* Chốt chặn quyền ở TẦNG NGHIỆP VỤ (tương đương kiểm tra ở server + RLS).
+   Mọi hàm ghi dữ liệu / xuất dữ liệu gọi guard() ở dòng đầu tiên, nên gọi thẳng
+   hàm từ console cũng bị chặn chứ không chỉ ẩn nút ngoài giao diện. */
+function guard(perm, msg){
+  if(can(perm)) return true;
+  const m = msg || 'Bạn không có quyền thực hiện thao tác này';
+  try{ toast(m+' (thiếu quyền: '+perm+')','err'); }catch(e){}
+  try{ au(new Date(), S.user?S.user.id:'—','denied','permissions',perm,'—',location.hash); DB.audit.sort((a,b)=>b.at-a.at); }catch(e){}
+  console.warn('[RBAC] Từ chối: thiếu quyền "'+perm+'"');
+  return false;
 }
 const NAV = [
   {group:null, items:[{k:'dashboard', ic:'dashboard', lb:'Tổng quan', to:'#/dashboard', perm:'dashboard'}]},
@@ -422,7 +433,7 @@ function viewDashboard(){
   const srcData=Object.entries(srcAgg).sort((a,b)=>b[1]-a[1]).map(([k,v])=>({l:srcName(k),v,color:srcColors[k]||'#94A3B8'}));
 
   return head('Tổng quan hoạt động','Hôm nay, '+fmtD(TODAY)+' · Dữ liệu phễu &amp; doanh thu theo <b>'+RANGES[S.range]+'</b> · cập nhật lúc '+fmtT(d(0,10,42)),
-    `${rangeSelect()}<button class="btn" onclick="exportCustomers(DB.customers)">${ic('download',16)} Xuất Excel</button>`)
+    `${rangeSelect()}${can('data.export')?`<button class="btn" onclick="exportCustomers(DB.customers)">${ic('download',16)} Xuất Excel</button>`:''}`)
   + `<div class="grid g4" style="margin-bottom:14px">
       ${stat('Lead mới','+'+newLeads,'18% so với hôm qua','inbox','delta-up',"location.hash='#/leads'")}
       ${stat('Cuộc gọi',callsToday||64,'6 cuộc so với hôm qua','phone','delta-up',"location.hash='#/telesales'")}
@@ -502,7 +513,7 @@ function viewLeads(){
 
   return head('Khách hàng tiềm năng','Lead từ quảng cáo &amp; các nguồn marketing · '+DB.customers.length+' bản ghi',
     `${can('leads.assign')?`<button class="btn" onclick="location.hash='#/admin/assign'">${ic('repeat',16)} Phân bổ lead</button>`:''}
-     <button class="btn" onclick="exportCustomers(window._leadList||[])">${ic('download',16)} Xuất Excel</button>
+     ${can('data.export')?`<button class="btn" onclick="exportCustomers(window._leadList||[])">${ic('download',16)} Xuất Excel</button>`:''}
      ${can('leads.import')?`<button class="btn primary" onclick="location.hash='#/leads/import'">${ic('plus',16)} Import Excel</button>`:''}`)
   + `<div class="grid g5" style="margin-bottom:14px">
       ${stat('Tổng lead',DB.customers.length,'30 ngày: +'+DB.customers.filter(c=>daysBetween(c.created_at,TODAY)<=30).length,'inbox','up')}
@@ -698,7 +709,7 @@ function viewTelesales(){
   const myCalls=DB.calls.filter(c=>c.user_id===S.user.id&&sameDay(c.at,TODAY)).length;
 
   return head('Danh sách khách hàng cần gọi', S.user.roles.includes('telesales')&&!S.user.roles.includes('admin')?'Bạn đang xem <b>lead được giao cho '+esc(S.user.name)+'</b> — hệ thống chặn truy cập lead của người khác ở tầng máy chủ (RLS).':'Xem toàn bộ lead (quyền Admin)',
-    `<button class="btn" onclick="exportCallList(window._tsList||[])">${ic('download',16)} Xuất danh sách</button>
+    `${can('data.export')?`<button class="btn" onclick="exportCallList(window._tsList||[])">${ic('download',16)} Xuất danh sách</button>`:''}
      <button class="btn primary" onclick="openBooking()">${ic('calendarPlus',16)} Đặt lịch khám</button>`)
   + `<div class="grid g6" style="margin-bottom:14px">
       ${stat('Cần gọi hôm nay',all.filter(groups.today.fn).length,'','clock','dn',"S.filters.ts.tab='today';render()")}
@@ -746,7 +757,9 @@ function callModal(cid){
           <div style="font-size:18px;font-weight:750">${esc(c.name)}</div>
           <div style="opacity:.9;font-size:13px;margin-top:2px">${c.code} · ${c.gender==='M'?'Nam':'Nữ'} · ${age(c.dob)} tuổi</div>
           <div class="mono" style="font-size:20px;font-weight:750;margin:12px 0 4px;letter-spacing:1px">${fmtPhone(c.phone)}</div>
-          <a href="tel:${c.phone}" class="btn lg w" style="background:#fff;color:var(--brand-700);border-color:#fff;margin-top:8px;display:inline-flex" onclick="toast('Đang khởi tạo cuộc gọi qua tel: — sẵn sàng thay bằng CallProvider (VoIP)','ok')">${ic('phone',15)} GỌI NGAY</a>
+          ${can('customer.view_phone')
+            ? `<a href="tel:${c.phone}" class="btn lg w" style="background:#fff;color:var(--brand-700);border-color:#fff;margin-top:8px;display:inline-flex" onclick="toast('Đang khởi tạo cuộc gọi qua tel: — sẵn sàng thay bằng CallProvider (VoIP)','ok')">${ic('phone',15)} GỌI NGAY</a>`
+            : `<div style="margin-top:8px;font-size:12.5px;opacity:.9">${ic('lock',14)} Bạn không có quyền xem/gọi số điện thoại đầy đủ</div>`}
           ${c.phone2?`<div style="font-size:12px;margin-top:9px;opacity:.85">SĐT phụ: ${fmtPhone(c.phone2)}</div>`:''}
         </div>
         <div class="kv" style="margin-top:14px">
@@ -904,7 +917,7 @@ function viewCustomers(){
   window._cusList=list;
   const lc={lead:'Lead',customer:'Khách hàng',patient:'Bệnh nhân'};
   return head('Hồ sơ khách hàng','Một người – một hồ sơ duy nhất. Trạng thái vòng đời thay đổi theo hành trình (Lead '+ic('arrowRight',15)+' Khách hàng '+ic('arrowRight',15)+' Bệnh nhân).',
-    `<button class="btn" onclick="exportCustomers(window._cusList||[])">${ic('download',16)} Xuất Excel</button>
+    `${can('data.export')?`<button class="btn" onclick="exportCustomers(window._cusList||[])">${ic('download',16)} Xuất Excel</button>`:''}
      <button class="btn primary" onclick="openCustomerForm()">${ic('userPlus',16)} Thêm khách hàng</button>`)
   + `<div class="grid g4" style="margin-bottom:14px">
     ${stat('Tổng hồ sơ',DB.customers.length,'','users')}
@@ -980,7 +993,10 @@ function viewCustomer360(cid){
             ${custTimeline(cid).length>14?`<button class="btn sm block" style="margin-top:8px" onclick="S.filters.c360tab='log';render()">Xem toàn bộ ${custTimeline(cid).length} sự kiện ${ic('arrowRight',15)}</button>`:''}</div></div>
       </div>
       <div>
-        ${co?`<div class="card" style="margin-bottom:14px"><div class="card-h"><h3>Liệu trình hiện tại</h3></div><div class="card-b">
+        ${co?`<div class="card" style="margin-bottom:14px"><div class="card-h"><h3>Liệu trình hiện tại</h3>
+          ${cos.length>1?`<span class="badge b-purple nodot">+${cos.length-1} gói khác</span>`:''}
+          <div class="r"><button class="btn sm" onclick="S.filters.c360tab='course';render()">Tất cả gói</button></div></div><div class="card-b">
+          ${co.area?`<div class="chips" style="margin-bottom:8px"><span class="badge b-purple nodot">Vùng: ${esc(co.area)}</span></div>`:''}
           <div style="font-weight:700">${esc(pkgById(co.package_id).name)}</div>
           <div class="t-sub mono" style="margin-bottom:10px">${co.code} · ${esc(co.diagnosis)}</div>
           <div style="display:flex;justify-content:space-between;font-size:13px;margin-bottom:5px"><b>${co.done_sessions}/${co.total_sessions} buổi</b><span>${Math.round(co.done_sessions/co.total_sessions*100)}%</span></div>
@@ -1038,8 +1054,7 @@ function viewCustomer360(cid){
       </div></div></div>`).join('') : `<div class="card"><div class="empty"><div class="ic-box">${ic('clipboard',16)}</div><div class="t">Chưa có hồ sơ khám</div><div>Hồ sơ sẽ được tạo khi bác sĩ bắt đầu khám bệnh nhân.</div></div></div>`;
   }
   if(tab==='course'){
-    body=cos.length? `<div class="grid g2">${cos.map(x=>courseCard(x)).join('')}</div>`
-      : `<div class="card"><div class="empty"><div class="ic-box">${ic('pill',16)}</div><div class="t">Chưa có liệu trình</div><div>Liệu trình được tạo sau khi bác sĩ đề xuất và Trưởng phòng kích hoạt.</div></div></div>`;
+    body=courseTabBlock(cid, cos);
   }
   if(tab==='progress'){
     body = co && co.status!=='pending' ? progressBlock(co) : `<div class="card"><div class="empty"><div class="ic-box">${ic('lineChart',16)}</div><div class="t">Chưa có dữ liệu tiến triển</div><div>Cần có liệu trình đang hoạt động và ít nhất 1 buổi điều trị đã nhập chỉ số lượng giá.</div></div></div>`;
@@ -1086,6 +1101,7 @@ function viewCustomer360(cid){
             <button class="btn" onclick="openBooking('${cid}')">${ic('calendar',16)} ĐẶT LỊCH</button>
             <button class="btn" onclick="openNote('${cid}')">${ic('edit',16)} TẠO GHI CHÚ</button>
             ${co&&co.status!=='pending'?`<button class="btn" onclick="location.hash='#/treatment/${co.id}'">${ic('pill',16)} LIỆU TRÌNH</button>`:''}
+            ${can('treatment.purchase')?`<button class="btn" onclick="openAddPackage('${cid}')">${ic('package',16)} MUA THÊM GÓI</button>`:''}
           </div>
         </div>
         <div class="kpi">
@@ -1101,15 +1117,55 @@ function viewCustomer360(cid){
 }
 function courseCard(co){
   const pkg=pkgById(co.package_id); const pct=Math.round(co.done_sessions/co.total_sessions*100);
-  return `<div class="card"><div class="card-h"><h3>${esc(pkg.name)}</h3><span class="badge ${co.status==='active'?'b-teal':co.status==='completed'?'b-green':co.status==='pending'?'b-amber':'b-red'}">${co.status==='active'?'Đang điều trị':co.status==='completed'?'Hoàn thành':co.status==='pending'?'Chờ kích hoạt':'Đã hủy'}</span></div>
+  return `<div class="card"><div class="card-h"><h3>${esc(pkg.name)}</h3><span class="badge ${courseStatusColor(co.status)}">${courseStatusLb(co.status)}</span></div>
   <div class="card-b"><div class="t-code" style="margin-bottom:8px">${co.code} · ${esc(co.diagnosis)}</div>
+  ${co.area?`<div class="chips" style="margin-bottom:8px"><span class="badge b-purple nodot">${ic('target',13)} Vùng: ${esc(co.area)}</span></div>`:''}
   <div style="display:flex;justify-content:space-between;font-size:13px;margin-bottom:5px"><b>${co.done_sessions}/${co.total_sessions} buổi</b><span>${pct}%</span></div>
   <div class="progress"><i style="width:${pct}%"></i></div>
-  <div class="kv" style="margin-top:12px"><div class="k">Bác sĩ</div><div class="v">${esc(userName(co.doctor_id))}</div>
+  <div class="kv" style="margin-top:12px"><div class="k">Bác sĩ</div><div class="v">${co.doctor_id?esc(userName(co.doctor_id)):'—'}</div>
   <div class="k">Thời gian</div><div class="v">${co.start_date?fmtD(co.start_date)+' '+ic('arrowRight',15)+' '+fmtD(co.end_date_est):'Chưa bắt đầu'}</div>
+  <div class="k">Đã dùng / còn lại</div><div class="v">${co.done_sessions} buổi · <b>còn ${courseRemaining(co)} buổi</b></div>
   <div class="k">Giá trị</div><div class="v">${money(co.total)}đ${co.discount?` <span class="t-sub">(giảm ${money(co.discount)})</span>`:''}</div>
   <div class="k">Công nợ</div><div class="v" style="color:${co.total-co.paid>0?'var(--danger)':'var(--ok)'}">${co.total-co.paid>0?money(co.total-co.paid)+'đ':'Đã thanh toán đủ'}</div></div>
   <button class="btn block" style="margin-top:11px" onclick="location.hash='#/treatment/${co.id}'">Xem chi tiết ${ic('arrowRight',15)}</button></div></div>`;
+}
+/* Tab "Liệu trình" của hồ sơ 360: chuyển qua lại giữa các gói + mua thêm gói.
+   Mọi gói của khách đều hiển thị, gói cũ không bị thay thế. */
+function courseTabBlock(cid, cos){
+  const buyBtn = can('treatment.purchase')
+    ? `<button class="btn sm primary" onclick="openAddPackage('${cid}')">${ic('package',16)} ＋ Mua thêm gói</button>` : '';
+  if(!cos.length) return `<div class="card"><div class="card-h"><h3>Liệu trình</h3><div class="r">${buyBtn}</div></div>
+    <div class="empty"><div class="ic-box">${ic('pill',16)}</div><div class="t">Chưa có liệu trình</div>
+    <div>Liệu trình được tạo khi bác sĩ đề xuất hoặc khi khách mua gói tại quầy.</div></div></div>`;
+  const sel = cos.find(x=>x.id===S.filters.coSel) || cos.find(x=>x.status==='active') || cos[0];
+  S.filters.coSel = sel.id;
+  const ss=courseSessions(sel.id);
+  return `<div class="card" style="margin-bottom:14px"><div class="card-h"><h3>Các gói trị liệu</h3>
+      <span class="badge b-gray nodot">${cos.length} gói</span>
+      <span class="sub">${cos.filter(x=>x.status==='active').length} đang điều trị · ${cos.filter(x=>x.status==='pending').length} chờ kích hoạt</span>
+      <div class="r">${buyBtn}</div></div>
+    <div class="card-b">
+      <div class="chips" role="tablist" aria-label="Chọn gói trị liệu">
+        ${cos.map(x=>`<div class="chip ${x.id===sel.id?'on':''}" role="tab" tabindex="0" aria-selected="${x.id===sel.id}"
+          onclick="S.filters.coSel='${x.id}';render()" onkeydown="if(event.key==='Enter'||event.key===' '){event.preventDefault();S.filters.coSel='${x.id}';render()}">
+          ${esc(pkgById(x.package_id).name.split(' - ')[0])}${x.area?' · '+esc(x.area):''}
+          <span class="cnt">${x.done_sessions}/${x.total_sessions}</span></div>`).join('')}
+      </div>
+    </div></div>
+    <div class="grid g-2-1">
+      <div class="card"><div class="card-h"><h3>Lịch sử sử dụng từng buổi</h3>
+        <span class="badge ${courseStatusColor(sel.status)}">${courseStatusLb(sel.status)}</span>
+        <span class="sub">${sel.code}${sel.area?' · '+esc(sel.area):''}</span>
+        <div class="r"><button class="btn sm" onclick="location.hash='#/treatment/${sel.id}'">Mở trang liệu trình ${ic('arrowRight',15)}</button></div></div>
+        <div class="card-b">${ss.length?ss.map(x=>{const st=SESS_ST[x.status];
+          return `<div class="sess ${x.status==='done'?'done':x.status==='booked'?'booked':''}" onclick="sessionDetail('${x.id}')">
+            <div class="n">${x.status==='done'?ic('check',15):x.no}</div>
+            <div style="flex:1;min-width:0"><div style="font-weight:650">Buổi ${x.no}${x.at?' — '+fmtD(x.at)+' '+fmtT(x.at):''}</div>
+              <div class="t-sub">${esc(x.status==='done'?(x.intervention||x.services.join(', ')):x.services.join(', '))}${x.tech_id?' · KTV '+esc(userName(x.tech_id).replace('KTV. ','')):''}</div></div>
+            <span class="badge ${st.color}">${st.label}</span></div>`}).join('')
+          :'<div class="empty" style="padding:22px"><div class="t">Chưa sinh buổi điều trị</div></div>'}</div></div>
+      <div>${courseCard(sel)}</div>
+    </div>`;
 }
 
 /* ================= CALENDAR ================= */
@@ -1177,8 +1233,12 @@ function apptDetail(id){
       <div class="k">Điện thoại</div><div class="v mono">${fmtPhone(c.phone)}</div>
       <div class="k">Thời gian</div><div class="v">${fmtDT(a.at)}</div>
       <div class="k">Loại lịch</div><div class="v">${esc(a.type)}</div>
-      <div class="k">Bác sĩ</div><div class="v">${esc(userName(a.doctor))}</div>
+      <div class="k">Bác sĩ</div><div class="v">${a.doctor?esc(userName(a.doctor)):'— chưa chỉ định —'}</div>
+      <div class="k">Kỹ thuật viên</div><div class="v">${a.technician_id?esc(userName(a.technician_id)):'— chưa chỉ định —'}</div>
+      <div class="k">Tư vấn viên</div><div class="v">${a.consultant_id?esc(userName(a.consultant_id)):'— chưa chỉ định —'}</div>
       <div class="k">Phòng</div><div class="v">${(DB.rooms.find(r=>r.id===a.room)||{name:''}).name}</div>
+      ${a.flow?`<div class="k">Luồng tiếp đón</div><div class="v">${VISIT_FLOW[visitFlow(a)].label}</div>`:''}
+      ${a.reason?`<div class="k">Lý do đến khám</div><div class="v" style="font-weight:500">${esc(a.reason)}</div>`:''}
       <div class="k">Nguồn khách</div><div class="v">${srcName(c.source)}</div>
       <div class="k">Người đặt</div><div class="v">${esc(userName(a.booked_by))}</div>
       ${a.checkin_at?`<div class="k">Giờ check-in</div><div class="v">${fmtT(a.checkin_at)}</div>`:''}
@@ -1194,115 +1254,296 @@ function apptDetail(id){
     <button class="btn" onclick="closeModal();callModal('${c.id}')">${ic('phone',15)} Gọi khách</button>
     ${['booked','confirmed','no_show'].includes(a.status)?`<button class="btn" onclick="openReschedule('${id}')">${ic('repeat',15)} Đổi lịch</button>
       <button class="btn danger" onclick="openCancelAppt('${id}')">${ic('ban',15)} Hủy lịch</button>`:''}
-    ${['booked','confirmed'].includes(a.status)&&can('reception')?`<button class="btn primary" onclick="checkIn('${id}')">${ic('checkCircle',16)} Check-in</button>`:''}</div></div>`);
+    ${isPresent(a)?`<button class="btn" onclick="closeModal();openVisitStaff('${id}')">${ic('users',16)} Đổi KTV / TVV</button>`:''}
+    ${isPresent(a)&&a.status!=='in_treatment'?`<button class="btn" onclick="closeModal();startTreatment('${id}')">${ic('activity',16)} Chuyển trị liệu</button>`:''}
+    ${isPresent(a)&&can('reception')?`<button class="btn primary" onclick="closeModal();checkOut('${id}')">${ic('checkCircle',16)} Check-out</button>`:''}
+    ${['booked','confirmed','arrived'].includes(a.status)&&can('reception')?`<button class="btn primary" onclick="checkIn('${id}')">${ic('checkCircle',16)} Check-in</button>`:''}</div></div>`);
 }
 function setApptStatus(id,st){ const a=DB.appointments.find(x=>x.id===id); a.status=st; closeModal(); toast('Đã cập nhật trạng thái lịch hẹn: '+apLabel(st),'ok'); buildNav(); render(); }
 
 /* ================= RECEPTION ================= */
+/* Luồng tiếp đón hỗ trợ 2 kịch bản trên CÙNG MỘT bản ghi visit:
+     A. Check-in -> Bác sĩ khám -> Điều trị -> Check-out
+     B. Check-in -> Điều trị trực tiếp -> Check-out
+   Sau check-in, visit ở trạng thái 'waiting' nên đồng thời xuất hiện ở
+   hàng chờ bác sĩ VÀ danh sách chờ check-out. Không nhân bản record. */
+const PRESENT_ST=['waiting','in_exam','in_treatment'];   // khách đang có mặt tại phòng khám
+const VISIT_FLOW={
+  doctor:{label:'Khám bác sĩ',color:'b-teal',icon:'stethoscope'},
+  treatment:{label:'Trị liệu trực tiếp',color:'b-pink',icon:'activity'},
+};
+function visitFlow(a){ return VISIT_FLOW[a.flow] ? a.flow : 'doctor'; }
+function flowBadge(a){ const f=VISIT_FLOW[visitFlow(a)];
+  return `<span class="badge ${f.color} nodot">${ic(f.icon,13)} ${f.label}</span>`; }
+function isPresent(a){ return PRESENT_ST.includes(a.status); }
+function visitStaffLine(a){
+  const bits=[];
+  if(a.doctor) bits.push('BS ' + userName(a.doctor));
+  if(a.technician_id) bits.push('KTV ' + userName(a.technician_id).replace('KTV. ',''));
+  if(a.consultant_id) bits.push('TVV ' + userName(a.consultant_id));
+  return bits.join(' · ');
+}
 function viewReception(){
   const t=todayAppts();
   const groups={upcoming:t.filter(a=>['booked','confirmed'].includes(a.status)), arrived:t.filter(a=>a.status==='arrived'),
-    waiting:t.filter(a=>a.status==='waiting'), exam:t.filter(a=>a.status==='in_exam'), done:t.filter(a=>a.status==='done'), noshow:t.filter(a=>a.status==='no_show')};
+    waiting:t.filter(a=>a.status==='waiting'), exam:t.filter(a=>a.status==='in_exam'),
+    treat:t.filter(a=>a.status==='in_treatment'),
+    present:t.filter(isPresent), done:t.filter(a=>a.status==='done'), noshow:t.filter(a=>a.status==='no_show')};
   const now=d(0,10,42);
-  const card=(title,items,color,extra)=>`<div class="card"><div class="card-h"><h3>${title}</h3><span class="badge ${color} nodot">${items.length}</span></div>
+  const card=(title,items,color,extra,sub)=>`<div class="card"><div class="card-h"><h3>${title}</h3><span class="badge ${color} nodot">${items.length}</span>${sub?`<span class="sub">${sub}</span>`:''}</div>
     <div class="card-b tight" style="max-height:400px;overflow-y:auto">${items.length?items.map(a=>{const c=custById(a.customer_id);
       const wait=a.checkin_at?Math.round((now-a.checkin_at)/60000):0;
+      const staff=visitStaffLine(a);
       return `<div class="queue-item"><span class="q-time">${fmtT(a.at)}</span>
-        <div style="flex:1;cursor:pointer" onclick="location.hash='#/customers/${c.id}'">
+        <div style="flex:1;min-width:0;cursor:pointer" onclick="location.hash='#/customers/${c.id}'">
           <div style="font-weight:650">${esc(c.name)}</div>
-          <div class="t-sub">${fmtPhone(c.phone)} · ${esc(a.type)} · ${esc(userName(a.doctor))}</div></div>
+          <div class="t-sub">${fmtPhone(c.phone)} · ${esc(a.type)}</div>
+          ${staff?`<div class="t-sub">${esc(staff)}</div>`:''}
+          ${extra==='present'?`<div style="margin-top:4px">${flowBadge(a)} <span class="badge ${apColor(a.status)}">${apLabel(a.status)}</span></div>`:''}</div>
         ${extra==='wait'&&wait?`<span class="wait-pill ${wait>15?'long':''}">chờ ${wait} phút</span>`:''}
+        <div class="q-acts">
         ${extra==='checkin'?`<button class="btn sm primary" onclick="event.stopPropagation();checkIn('${a.id}')">CHECK-IN</button>`:''}
-        ${extra==='queue'?`<button class="btn sm" onclick="event.stopPropagation();toast('Đã đẩy vào hàng chờ bác sĩ','ok')">${ic('arrowRight',15)} BS</button>`:''}
-        ${extra==='checkout'?`<button class="btn sm" onclick="event.stopPropagation();checkOut('${a.id}')">CHECK-OUT</button>`:''}
+        ${extra==='wait'?`<button class="btn sm" onclick="event.stopPropagation();startTreatment('${a.id}')">${ic('activity',15)} Trị liệu</button>`:''}
+        ${extra==='present'?`<button class="btn sm" onclick="event.stopPropagation();openVisitStaff('${a.id}')">${ic('users',15)} Nhân sự</button>
+          <button class="btn sm primary" onclick="event.stopPropagation();checkOut('${a.id}')">CHECK-OUT</button>`:''}
+        ${extra==='checkout'?`<button class="btn sm primary" onclick="event.stopPropagation();checkOut('${a.id}')">CHECK-OUT</button>`:''}
+        </div>
       </div>`}).join(''):`<div class="empty" style="padding:26px"><div class="t">Không có khách</div></div>`}</div></div>`;
-  return head('Tiếp đón — Hôm nay '+fmtD(TODAY),'Danh sách khách theo lịch hẹn · cập nhật thời gian thực',
+  return head('Tiếp đón — Hôm nay '+fmtD(TODAY),'Một lần khách đến = một bản ghi visit duy nhất · dùng chung cho bác sĩ, KTV và quầy check-out',
     `<button class="btn" onclick="location.hash='#/calendar'">${ic('calendar',16)} Xem lịch</button>
      <button class="btn primary" onclick="openWalkIn()">${ic('userPlus',16)} Khách vãng lai (walk-in)</button>`)
   + `<div class="grid g6" style="margin-bottom:14px">
       ${stat('Tổng lịch hôm nay',t.length,'','calendar')}
       ${stat('Sắp đến',groups.upcoming.length,'','clock')}
+      ${stat('Đang có mặt',groups.present.length,'Chờ check-out','userCheck',groups.present.length?'dn':'up')}
       ${stat('Đang chờ BS',groups.waiting.length,groups.waiting.length?'Cần ưu tiên':'','clock',groups.waiting.length?'dn':'up')}
-      ${stat('Đang khám',groups.exam.length,'','stethoscope')}
+      ${stat('Đang trị liệu',groups.treat.length,'','activity')}
       ${stat('Hoàn thành',groups.done.length,'','checkCircle','up')}
-      ${stat('Không đến',groups.noshow.length,groups.noshow.length?'Cần gọi lại':'','alert',groups.noshow.length?'dn':'up')}
     </div>
+    <div class="alert al-info">${ic('info',16)} <div>Khách <b>đã check-in</b> hiển thị đồng thời ở <b>hàng chờ bác sĩ</b> và <b>danh sách chờ check-out</b>.
+      Khách không cần khám có thể chuyển thẳng sang <b>Trị liệu</b> rồi check-out.</div></div>
     <div class="grid g3" style="margin-bottom:14px">
       ${card('Sắp đến',groups.upcoming,'b-blue','checkin')}
-      ${card('Phòng chờ — chờ bác sĩ',groups.waiting,'b-amber','wait')}
+      ${card('Đang chờ bác sĩ',groups.waiting,'b-amber','wait')}
       ${card('Đang khám',groups.exam,'b-teal','checkout')}
+    </div>
+    <div class="grid g3" style="margin-bottom:14px">
+      ${card('Đang trị liệu',groups.treat,'b-pink','checkout')}
+      ${card('Chờ check-out',groups.present,'b-purple','present','tất cả khách đang có mặt')}
+      ${card('Không đến / cần xử lý',groups.noshow,'b-red','')}
     </div>
     <div class="grid g2">
       ${card('Đã hoàn thành hôm nay',groups.done,'b-green','')}
-      ${card('Không đến / cần xử lý',groups.noshow,'b-red','')}
+      ${card('Đã đến, chưa check-in',groups.arrived,'b-gray','checkin')}
     </div>`;
 }
+/* ---- Form check-in: có thêm Kỹ thuật viên + Tư vấn viên, lưu vào visit ---- */
 function checkIn(apid){
   const a=DB.appointments.find(x=>x.id===apid), c=custById(a.customer_id);
+  const seePhone=can('customer.view_phone');
+  const defFlow = a.flow || (/điều trị|trị liệu/i.test(a.type||'') ? 'treatment' : 'doctor');
   closeModal();
-  modal(`<div class="modal wide"><div class="modal-h"><h3>Check-in khách hàng</h3><button class="x" onclick="closeModal()">${ic('x',16)}</button></div>
+  modal(`<div class="modal wide"><div class="modal-h"><h3>Check-in khách hàng</h3><button class="x" aria-label="Đóng" onclick="closeModal()">${ic('x',16)}</button></div>
   <div class="modal-b">
     <div class="alert al-ok">${ic('check',15)} <div>Đã tìm thấy hồ sơ sẵn có <b>${c.code}</b> — hệ thống <b>không tạo bệnh nhân mới</b>, chỉ cập nhật thông tin còn thiếu.</div></div>
     <div class="grid g2">
-      <label class="fld"><span class="lb">Họ tên <span class="req">*</span></span><input class="inp" value="${esc(c.name)}"></label>
-      <label class="fld"><span class="lb">Ngày sinh <span class="req">*</span></span><input class="inp" type="date" value="${new Date(c.dob).toISOString().slice(0,10)}"></label>
-      <label class="fld"><span class="lb">Giới tính</span><select class="inp"><option ${c.gender==='M'?'selected':''}>Nam</option><option ${c.gender==='F'?'selected':''}>Nữ</option></select></label>
-      <label class="fld"><span class="lb">Điện thoại <span class="req">*</span></span><input class="inp mono" value="${fmtPhone(c.phone)}"></label>
+      <label class="fld" for="ci-name"><span class="lb">Họ tên <span class="req">*</span></span><input class="inp" id="ci-name" value="${esc(c.name)}"></label>
+      <label class="fld" for="ci-dob"><span class="lb">Ngày sinh <span class="req">*</span></span><input class="inp" id="ci-dob" type="date" value="${new Date(new Date(c.dob).getTime()-new Date(c.dob).getTimezoneOffset()*60000).toISOString().slice(0,10)}"></label>
+      <label class="fld" for="ci-gender"><span class="lb">Giới tính</span><select class="inp" id="ci-gender">
+        <option value="M" ${c.gender==='M'?'selected':''}>Nam</option><option value="F" ${c.gender==='F'?'selected':''}>Nữ</option></select></label>
+      <label class="fld" for="ci-phone"><span class="lb">Điện thoại <span class="req">*</span></span>
+        <input class="inp mono" id="ci-phone" value="${fmtPhone(c.phone)}" ${seePhone?'':'readonly aria-readonly="true" title="Bạn không có quyền xem đầy đủ số điện thoại"'}></label>
     </div>
-    <label class="fld"><span class="lb">Địa chỉ</span><input class="inp" value="${esc(c.address)}"></label>
+    <label class="fld" for="ci-addr"><span class="lb">Địa chỉ</span><input class="inp" id="ci-addr" value="${esc(c.address)}"></label>
     <div class="grid g2">
-      <label class="fld"><span class="lb">Nghề nghiệp</span><input class="inp" value="${esc(c.job)}"></label>
-      <label class="fld"><span class="lb">Người liên hệ khi cần</span><input class="inp" value="${esc(c.contact_person)}" placeholder="Họ tên – quan hệ – SĐT"></label>
+      <label class="fld" for="ci-job"><span class="lb">Nghề nghiệp</span><input class="inp" id="ci-job" value="${esc(c.job)}"></label>
+      <label class="fld" for="ci-contact"><span class="lb">Người liên hệ khi cần</span><input class="inp" id="ci-contact" value="${esc(c.contact_person)}" placeholder="Họ tên – quan hệ – SĐT"></label>
     </div>
+    <div class="divider"></div>
+    <div class="sec-t">Phân công tiếp nhận</div>
     <div class="grid g2">
-      <label class="fld"><span class="lb">Bác sĩ khám</span><select class="inp">${DOCTORS.map(u=>`<option ${u.id===a.doctor?'selected':''}>${u.name}</option>`).join('')}</select></label>
-      <label class="fld"><span class="lb">Phòng</span><select class="inp">${DB.rooms.map(r=>`<option ${r.id===a.room?'selected':''}>${r.name}</option>`).join('')}</select></label>
+      <label class="fld" for="ci-doc"><span class="lb">Bác sĩ khám</span><select class="inp" id="ci-doc">
+        <option value="">— Chưa chỉ định —</option>
+        ${doctorList().map(u=>`<option value="${u.id}" ${u.id===a.doctor?'selected':''}>${esc(u.name)}${u.spec?' · '+esc(u.spec):''}</option>`).join('')}</select></label>
+      <label class="fld" for="ci-room"><span class="lb">Phòng</span><select class="inp" id="ci-room">
+        ${DB.rooms.map(r=>`<option value="${r.id}" ${r.id===a.room?'selected':''}>${esc(r.name)}</option>`).join('')}</select></label>
+      <label class="fld" for="ci-tech"><span class="lb">Kỹ thuật viên</span><select class="inp" id="ci-tech">
+        <option value="">— Chưa chỉ định —</option>
+        ${techList().map(u=>`<option value="${u.id}" ${u.id===a.technician_id?'selected':''}>${esc(u.name)}</option>`).join('')}</select>
+        <div class="hint">Lấy từ danh sách nhân sự có vai trò Kỹ thuật viên.</div></label>
+      <label class="fld" for="ci-consultant"><span class="lb">Tư vấn viên</span><select class="inp" id="ci-consultant">
+        <option value="">— Chưa chỉ định —</option>
+        ${consultantList().map(u=>`<option value="${u.id}" ${u.id===(a.consultant_id||c.assigned_to)?'selected':''}>${esc(u.name)} · ${esc(u.roles.map(roleName).join(', '))}</option>`).join('')}</select>
+        <div class="hint">Nhân sự Telesales / CSKH. Có thể để trống và bổ sung sau.</div></label>
     </div>
-    <label class="fld"><span class="lb">Lý do đến khám hôm nay</span><textarea class="inp">${esc(c.concern)}</textarea></label>
+    <div class="fld"><span class="lb">Khách đi theo luồng nào?</span>
+      <div class="chips" id="ci-flow" role="radiogroup" aria-label="Luồng tiếp đón">
+        ${Object.entries(VISIT_FLOW).map(([k,v])=>`<div class="chip ${defFlow===k?'on':''}" role="radio" tabindex="0" aria-checked="${defFlow===k}" data-flow="${k}"
+          onclick="[...this.parentNode.children].forEach(x=>{x.classList.remove('on');x.setAttribute('aria-checked','false')});this.classList.add('on');this.setAttribute('aria-checked','true')">${ic(v.icon,14)} ${v.label}</div>`).join('')}
+      </div>
+      <div class="hint">Dù chọn luồng nào, khách vẫn hiển thị ở hàng chờ bác sĩ và danh sách chờ check-out.</div></div>
+    <label class="fld" for="ci-reason"><span class="lb">Lý do đến khám hôm nay</span><textarea class="inp" id="ci-reason" rows="2">${esc(a.reason||c.concern)}</textarea></label>
   </div>
   <div class="modal-f"><button class="btn" onclick="closeModal()">Hủy</button><button class="btn primary" onclick="doCheckIn('${apid}')">${ic('checkCircle',16)} Xác nhận check-in</button></div></div>`);
 }
-function doCheckIn(apid){
-  const a=DB.appointments.find(x=>x.id===apid), c=custById(a.customer_id);
-  a.status='waiting'; a.checkin_at=new Date();
-  c.status='WAITING_DOCTOR'; c.lifecycle='patient';
-  tl(c.id,a.checkin_at,'checkCircle','green','Lễ tân check-in','Phòng '+(DB.rooms.find(r=>r.id===a.room)||{name:''}).name+' · '+userName(a.doctor),'Bởi '+S.user.name);
+/* Lõi nghiệp vụ check-in — tách khỏi DOM để kiểm thử được.
+   Trả về bản ghi visit đã cập nhật, hoặc null nếu bị từ chối. */
+function checkInVisit(apid, v){
+  if(!guard('reception','Chỉ Lễ tân / Quản trị được check-in khách')) return null;
+  const a=DB.appointments.find(x=>x.id===apid); if(!a) return null;
+  const c=custById(a.customer_id); if(!c) return null;
+  v=v||{};
+  const name=(v.name!==undefined?String(v.name).trim():c.name);
+  if(!name){ toast('Vui lòng nhập họ tên khách hàng','err'); return null; }
+  /* Người không có quyền xem SĐT thấy bản che -> giữ nguyên số gốc, không ghi đè bằng dấu * */
+  const rawPhone = v.phone!==undefined ? String(v.phone) : '';
+  const phone = (!rawPhone || rawPhone.includes('*')) ? c.phone : (normPhone(rawPhone)||c.phone);
+  const dup=DB.customers.find(x=>x.id!==c.id&&normPhone(x.phone)===phone);
+  if(dup){ toast('Số điện thoại đã thuộc hồ sơ '+dup.name+' — không tạo hồ sơ trùng','err'); return null; }
+  const flow=VISIT_FLOW[v.flow]?v.flow:'doctor';
+  const before={doctor:a.doctor, tech:a.technician_id, consultant:a.consultant_id, status:a.status};
+
+  /* 1. cập nhật thông tin hành chính lên ĐÚNG hồ sơ sẵn có (không tạo bệnh nhân mới) */
+  c.name=name; c.phone=phone;
+  if(v.dob) c.dob=new Date(v.dob+'T00:00:00');
+  if(v.gender) c.gender=v.gender;
+  if(v.address!==undefined) c.address=v.address;
+  if(v.job!==undefined) c.job=v.job;
+  if(v.contact_person!==undefined) c.contact_person=v.contact_person;
+
+  /* 2. ghi vào bản ghi visit — dùng lại chính lịch hẹn này, không nhân bản */
+  a.status='waiting'; a.checkin_at=new Date(); a.checkin_by=S.user.id;
+  a.doctor=v.doctor||a.doctor; a.room=v.room||a.room;
+  a.technician_id=v.technician_id||null; a.consultant_id=v.consultant_id||null;
+  a.reason=v.reason!==undefined?v.reason:(a.reason||c.concern); a.flow=flow;
+
+  /* 3. trạng thái khách đủ linh hoạt cho cả hai luồng */
+  c.lifecycle='patient';
+  if(flow==='doctor') c.status='WAITING_DOCTOR';
+  else if(!['IN_TREATMENT','PACKAGE_ACTIVE','TREATMENT_COMPLETED'].includes(c.status)) c.status='CHECKED_IN';
+
+  const staff=visitStaffLine(a);
+  tl(c.id,a.checkin_at,'checkCircle','green','Lễ tân check-in ('+VISIT_FLOW[flow].label+')',
+     (DB.rooms.find(r=>r.id===a.room)||{name:''}).name+(staff?' · '+staff:''),'Bởi '+S.user.name);
   DB.timeline.sort((x,y)=>y.at-x.at);
-  closeModal(); toast(c.name+' đã check-in — đã chuyển vào hàng chờ bác sĩ','ok'); buildNav(); render();
+  au(new Date(),S.user.id,'checkin','appointments',a.id, JSON.stringify(before),
+     JSON.stringify({status:a.status, flow:a.flow, doctor:a.doctor, technician_id:a.technician_id, consultant_id:a.consultant_id}));
+  DB.audit.sort((x,y)=>y.at-x.at);
+  return a;
+}
+function doCheckIn(apid){
+  const g=id=>{ const n=$('#'+id); return n?n.value.trim():''; };
+  const flowEl=document.querySelector('#ci-flow .chip.on');
+  const a=checkInVisit(apid,{
+    name:g('ci-name'), dob:g('ci-dob'), gender:g('ci-gender'), phone:g('ci-phone'),
+    address:g('ci-addr'), job:g('ci-job'), contact_person:g('ci-contact'),
+    doctor:g('ci-doc'), room:g('ci-room'),
+    technician_id:g('ci-tech'), consultant_id:g('ci-consultant'),
+    reason:g('ci-reason'), flow:flowEl?flowEl.dataset.flow:'doctor',
+  });
+  if(!a) return;
+  closeModal();
+  toast(custById(a.customer_id).name+' đã check-in — có mặt trong hàng chờ bác sĩ và danh sách chờ check-out','ok');
+  buildNav(); render();
+}
+/* Chuyển khách sang trị liệu (dùng cho cả khách không qua bác sĩ) */
+function startTreatment(apid){
+  if(!can('reception')&&!can('treatment.sessions')&&!can('admin'))
+    return guard('treatment.sessions','Bạn không có quyền chuyển khách sang trị liệu');
+  const a=DB.appointments.find(x=>x.id===apid), c=custById(a.customer_id);
+  if(!a||!isPresent(a)) return toast('Khách chưa check-in','warn');
+  const before=a.status;
+  a.status='in_treatment'; a.treat_start=new Date();
+  if(!['IN_TREATMENT','TREATMENT_COMPLETED'].includes(c.status)) c.status='IN_TREATMENT';
+  tl(c.id,new Date(),'activity','teal','Bắt đầu trị liệu',
+     (DB.rooms.find(r=>r.id===a.room)||{name:''}).name+(a.technician_id?' · KTV '+userName(a.technician_id):''),S.user.name);
+  DB.timeline.sort((x,y)=>y.at-x.at);
+  au(new Date(),S.user.id,'treatment_start','appointments',a.id,before,'in_treatment'); DB.audit.sort((x,y)=>y.at-x.at);
+  toast(c.name+' đã chuyển sang trị liệu — vẫn nằm trong danh sách chờ check-out','ok');
+  buildNav(); render();
+}
+/* Đổi KTV / Tư vấn viên sau khi đã check-in */
+function openVisitStaff(apid){
+  const a=DB.appointments.find(x=>x.id===apid), c=custById(a.customer_id);
+  modal(`<div class="modal"><div class="modal-h"><h3>Nhân sự phụ trách lượt khám</h3>
+    <button class="x" aria-label="Đóng" onclick="closeModal()">${ic('x',16)}</button></div>
+  <div class="modal-b">
+    <div class="alert al-info">${ic('user',16)}<div><b>${esc(c.name)}</b> · ${c.code}<br><span class="t-sub">Visit ${a.id} · ${fmtDT(a.at)}</span></div></div>
+    <label class="fld" for="vs-doc"><span class="lb">Bác sĩ khám</span><select class="inp" id="vs-doc"><option value="">— Chưa chỉ định —</option>
+      ${doctorList().map(u=>`<option value="${u.id}" ${u.id===a.doctor?'selected':''}>${esc(u.name)}</option>`).join('')}</select></label>
+    <label class="fld" for="vs-tech"><span class="lb">Kỹ thuật viên</span><select class="inp" id="vs-tech"><option value="">— Chưa chỉ định —</option>
+      ${techList().map(u=>`<option value="${u.id}" ${u.id===a.technician_id?'selected':''}>${esc(u.name)}</option>`).join('')}</select></label>
+    <label class="fld" for="vs-consultant"><span class="lb">Tư vấn viên</span><select class="inp" id="vs-consultant"><option value="">— Chưa chỉ định —</option>
+      ${consultantList().map(u=>`<option value="${u.id}" ${u.id===a.consultant_id?'selected':''}>${esc(u.name)} · ${esc(u.roles.map(roleName).join(', '))}</option>`).join('')}</select></label>
+    <label class="fld" for="vs-room"><span class="lb">Phòng</span><select class="inp" id="vs-room">
+      ${DB.rooms.map(r=>`<option value="${r.id}" ${r.id===a.room?'selected':''}>${esc(r.name)}</option>`).join('')}</select></label>
+  </div>
+  <div class="modal-f"><button class="btn" onclick="closeModal()">Hủy</button>
+    <button class="btn primary" onclick="saveVisitStaff('${apid}')">${ic('check',16)} Lưu phân công</button></div></div>`);
+}
+function saveVisitStaff(apid){
+  if(!can('reception')&&!can('treatment.sessions')&&!can('admin'))
+    return guard('reception','Bạn không có quyền đổi nhân sự phụ trách');
+  const a=DB.appointments.find(x=>x.id===apid), c=custById(a.customer_id);
+  const before={doctor:a.doctor, technician_id:a.technician_id, consultant_id:a.consultant_id, room:a.room};
+  a.doctor=$('#vs-doc').value||null; a.technician_id=$('#vs-tech').value||null;
+  a.consultant_id=$('#vs-consultant').value||null; a.room=$('#vs-room').value||a.room;
+  const chg=[];
+  if(before.technician_id!==a.technician_id){ chg.push('KTV: '+(before.technician_id?userName(before.technician_id):'—')+' → '+(a.technician_id?userName(a.technician_id):'—'));
+    au(new Date(),S.user.id,'change_technician','appointments',a.id,before.technician_id||'—',a.technician_id||'—'); }
+  if(before.consultant_id!==a.consultant_id){ chg.push('Tư vấn viên: '+(before.consultant_id?userName(before.consultant_id):'—')+' → '+(a.consultant_id?userName(a.consultant_id):'—'));
+    au(new Date(),S.user.id,'change_consultant','appointments',a.id,before.consultant_id||'—',a.consultant_id||'—'); }
+  if(before.doctor!==a.doctor) au(new Date(),S.user.id,'change_doctor','appointments',a.id,before.doctor||'—',a.doctor||'—');
+  DB.audit.sort((x,y)=>y.at-x.at);
+  if(chg.length){ tl(c.id,new Date(),'users','blue','Cập nhật nhân sự phụ trách',chg.join(' · '),S.user.name); DB.timeline.sort((x,y)=>y.at-x.at); }
+  closeModal(); toast('Đã lưu phân công cho lượt khám '+a.id,'ok'); render();
 }
 function checkOut(apid){
+  if(!guard('reception','Chỉ Lễ tân / Quản trị được check-out khách')) return;
   const a=DB.appointments.find(x=>x.id===apid), c=custById(a.customer_id);
-  confirmDlg('Check-out khách hàng','Xác nhận kết thúc dịch vụ cho <b>'+esc(c.name)+'</b>?<br><br>Hệ thống lưu: giờ check-in '+(a.checkin_at?fmtT(a.checkin_at):'—')+', bắt đầu khám '+(a.exam_start?fmtT(a.exam_start):'—')+', kết thúc '+fmtT(new Date())+'.',
-    ()=>{ a.status='done'; a.exam_end=new Date(); a.checkout_at=new Date();
+  if(!isPresent(a)) return toast('Khách không ở trạng thái đang có mặt','warn');
+  confirmDlg('Check-out khách hàng','Xác nhận kết thúc dịch vụ cho <b>'+esc(c.name)+'</b>?<br><br>Luồng: <b>'+VISIT_FLOW[visitFlow(a)].label+'</b><br>Hệ thống lưu: giờ check-in '+(a.checkin_at?fmtT(a.checkin_at):'—')+', bắt đầu khám '+(a.exam_start?fmtT(a.exam_start):'—')+', kết thúc '+fmtT(new Date())+'.',
+    ()=>{ const before=a.status;
+      a.status='done'; a.exam_end=a.exam_end||new Date(); a.checkout_at=new Date(); a.checkout_by=S.user.id;
+      tl(c.id,a.checkout_at,'checkCircle','green','Check-out',VISIT_FLOW[visitFlow(a)].label,S.user.name);
+      DB.timeline.sort((x,y)=>y.at-x.at);
+      au(new Date(),S.user.id,'checkout','appointments',a.id,before,'done'); DB.audit.sort((x,y)=>y.at-x.at);
       toast('Đã check-out '+c.name,'ok'); buildNav(); render(); },'Check-out');
 }
 
 /* ================= DOCTOR ================= */
 function viewDoctor(){
   const t=todayAppts();
-  const waiting=t.filter(a=>a.status==='waiting');
+  /* Mọi khách đã check-in đều hiện ở đây; cột "Luồng" cho biết ai cần khám,
+     ai đi thẳng trị liệu — bác sĩ chủ động bỏ qua chứ hệ thống không ép luồng. */
+  const waiting=t.filter(a=>a.status==='waiting')
+    .sort((x,y)=>(visitFlow(x)==='doctor'?0:1)-(visitFlow(y)==='doctor'?0:1) || (x.checkin_at||x.at)-(y.checkin_at||y.at));
+  const needDoc=waiting.filter(a=>visitFlow(a)==='doctor');
   const inexam=t.filter(a=>a.status==='in_exam');
+  const intreat=t.filter(a=>a.status==='in_treatment');
   const done=t.filter(a=>a.status==='done');
   const now=d(0,10,42);
   return head('Bàn làm việc bác sĩ','Hôm nay '+fmtD(TODAY)+' · '+esc(S.user.name),
     `<button class="btn" onclick="location.hash='#/calendar'">${ic('calendar',16)} Lịch của tôi</button>`)
   + `<div class="grid g4" style="margin-bottom:14px">
-      ${stat('Đang chờ khám',waiting.length,waiting.length?'Chờ lâu nhất '+Math.max(...waiting.map(a=>a.checkin_at?Math.round((now-a.checkin_at)/60000):0),0)+' phút':'','clock',waiting.length?'dn':'up')}
+      ${stat('Đang chờ khám',needDoc.length,needDoc.length?'Chờ lâu nhất '+Math.max(...needDoc.map(a=>a.checkin_at?Math.round((now-a.checkin_at)/60000):0),0)+' phút':'','clock',needDoc.length?'dn':'up')}
       ${stat('Đang khám',inexam.length,'','stethoscope')}
+      ${stat('Đi thẳng trị liệu',waiting.length-needDoc.length+intreat.length,'Không cần bác sĩ khám','activity','flat')}
       ${stat('Đã khám hôm nay',done.length,'','checkCircle','up')}
-      ${stat('Liệu trình đề xuất',DB.courses.filter(c=>c.proposed_at&&sameDay(c.proposed_at,TODAY)).length||3,'Chờ trưởng phòng duyệt','pill','flat',"location.hash='#/treatment'")}
     </div>
-    <div class="card" style="margin-bottom:14px"><div class="card-h"><h3>Bệnh nhân đang chờ</h3><span class="badge b-amber nodot">${waiting.length}</span>
-      <span class="sub">Sắp xếp theo thời gian chờ giảm dần</span></div>
-      <div class="tbl-wrap"><table><thead><tr><th>Tên</th><th>Tuổi / GT</th><th>Giờ hẹn</th><th>Lý do khám</th><th>Lần khám</th><th>Thời gian chờ</th><th style="width:170px"></th></tr></thead>
+    <div class="card" style="margin-bottom:14px"><div class="card-h"><h3>Bệnh nhân đã check-in, đang chờ</h3><span class="badge b-amber nodot">${waiting.length}</span>
+      <span class="sub">Khách chọn luồng trị liệu trực tiếp xếp cuối danh sách</span></div>
+      <div class="tbl-wrap"><table><thead><tr><th>Tên</th><th>Tuổi / GT</th><th>Giờ hẹn</th><th>Lý do khám</th><th>Luồng</th><th>KTV / Tư vấn viên</th><th>Thời gian chờ</th><th style="width:170px"></th></tr></thead>
       <tbody>${waiting.length?waiting.map(a=>{const c=custById(a.customer_id); const wait=a.checkin_at?Math.round((now-a.checkin_at)/60000):0;
         const visits=DB.appointments.filter(x=>x.customer_id===c.id&&x.status==='done').length;
-        return `<tr><td class="row-link" onclick="location.hash='#/customers/${c.id}'"><div class="t-name">${esc(c.name)}</div><div class="t-sub">${c.code}</div></td>
+        return `<tr><td class="row-link" onclick="location.hash='#/customers/${c.id}'"><div class="t-name">${esc(c.name)}</div><div class="t-sub">${c.code} · ${visits?'tái khám lần '+(visits+1):'lần đầu'}</div></td>
           <td>${age(c.dob)} · ${c.gender==='M'?'Nam':'Nữ'}</td><td><b>${fmtT(a.at)}</b></td>
-          <td>${esc(c.concern)}</td><td>${visits?'Tái khám (lần '+(visits+1)+')':'<span class="badge b-blue nodot">Lần đầu</span>'}</td>
+          <td>${esc(a.reason||c.concern)}</td>
+          <td>${flowBadge(a)}</td>
+          <td class="t-sub">${a.technician_id?esc(userName(a.technician_id)):'—'}<br>${a.consultant_id?esc(userName(a.consultant_id)):'—'}</td>
           <td><span class="wait-pill ${wait>15?'long':''}">${wait} phút</span></td>
           <td><button class="btn sm primary" onclick="startExam('${a.id}')">${ic('stethoscope',16)} BẮT ĐẦU KHÁM</button></td></tr>`}).join('')
-        :'<tr><td colspan="7"><div class="empty"><div class="ic-box">'+ic('checkCircle',22)+'</div><div class="t">Không có bệnh nhân đang chờ</div><div>Hàng chờ sẽ tự cập nhật khi lễ tân check-in khách.</div></div></td></tr>'}</tbody></table></div></div>
+        :'<tr><td colspan="8"><div class="empty"><div class="ic-box">'+ic('checkCircle',22)+'</div><div class="t">Không có bệnh nhân đang chờ</div><div>Hàng chờ sẽ tự cập nhật khi lễ tân check-in khách.</div></div></td></tr>'}</tbody></table></div></div>
     <div class="grid g2">
       <div class="card"><div class="card-h"><h3>Đang khám</h3></div><div class="card-b tight">
         ${inexam.map(a=>{const c=custById(a.customer_id); const e=DB.encounters.find(x=>x.customer_id===c.id);
@@ -1317,10 +1558,12 @@ function viewDoctor(){
     </div>`;
 }
 function startExam(apid){
+  if(!guard('medical','Bạn không có quyền khám bệnh')) return;
   const a=DB.appointments.find(x=>x.id===apid), c=custById(a.customer_id);
-  a.status='in_exam'; a.exam_start=a.exam_start||new Date(); c.status='IN_EXAMINATION';
+  a.status='in_exam'; a.exam_start=a.exam_start||new Date(); a.flow='doctor'; c.status='IN_EXAMINATION';
+  au(new Date(),S.user.id,'exam_start','appointments',a.id,'waiting','in_exam'); DB.audit.sort((x,y)=>y.at-x.at);
   let e=DB.encounters.find(x=>x.customer_id===c.id&&sameDay(x.at,TODAY));
-  if(!e){ e=mkEncounter(c,new Date(),S.user.id); e.status='draft';
+  if(!e){ e=mkEncounter(c,new Date(),S.user.id); e.status='draft'; e.saved_at=null; e.finalized_at=null; e._dirty=false;
     e.reason=''; e.symptoms=''; e.history=''; e.clinical=''; e.paraclinical=''; e.diagnosis=''; e.doctor_note=''; e.plan=''; e.advice=''; e.assessment_scale=''; e.body_map=[];
     DB.encounters.push(e); }
   tl(c.id,new Date(),'stethoscope','teal',S.user.name+' bắt đầu khám','','');
@@ -1342,17 +1585,42 @@ const ENC_FIELDS=[
   ['plan','J. Hướng điều trị','Bảo tồn / can thiệp; mục tiêu điều trị',2],
   ['advice','L. Dặn dò','Hướng dẫn tại nhà, sinh hoạt, tư thế, bài tập',2],
 ];
+/* Trạng thái hiển thị của hồ sơ khám — 3 mức theo yêu cầu nghiệp vụ:
+   'unsaved' Chưa lưu · 'saved' Đã lưu · 'final' Đã chốt bệnh án.
+   e._dirty được bật khi bác sĩ gõ và tắt khi bấm Lưu. */
+const ENC_STATE={
+  unsaved:{label:'Chưa lưu', color:'b-amber', icon:'edit'},
+  saved:{label:'Đã lưu', color:'b-blue', icon:'check'},
+  final:{label:'Đã chốt bệnh án', color:'b-green', icon:'lock'},
+};
+function encState(e){
+  if(e.status==='final') return 'final';
+  return (e.saved_at && !e._dirty) ? 'saved' : 'unsaved';
+}
+/* Một chỉ báo trạng thái duy nhất trên đầu màn hình — tránh hiển thị trùng lặp
+   giữa badge trạng thái và dòng "đã lưu lúc". */
+function encStateBadge(e){ const st=ENC_STATE[encState(e)];
+  const at = e.status==='final' ? e.finalized_at : e.saved_at;
+  return `<span class="badge ${st.color}" id="enc-state">${ic(st.icon,14)} ${st.label}${at?' · '+fmtT(at):''}</span>`; }
+/* Hồ sơ đã lưu (hoặc đã chốt) mới được in / xuất file. */
+function encPrintable(e){ return !!(e.saved_at || e.status==='final'); }
+
 function viewEncounter(eid){
   const e=encById(eid); if(!e) return '<div class="empty">Không tìm thấy hồ sơ khám</div>';
   const c=custById(e.customer_id);
   const prevEnc=DB.encounters.filter(x=>x.customer_id===c.id&&x.at<e.at).sort((a,b)=>b.at-a.at);
+  const printable=encPrintable(e);
   return head('Hồ sơ khám bệnh','<span class="mono">'+e.id+'</span> · '+esc(c.name)+' · '+c.code+' · '+age(c.dob)+' tuổi '+(c.gender==='M'?'Nam':'Nữ'),
-    `<span class="save-ind saved" id="save-ind">${ic('check',15)} Đã lưu lúc ${fmtT(new Date())}</span>
+    `${encStateBadge(e)}
+     ${e.status!=='final'?`<button class="btn primary" onclick="saveEnc('${eid}')">${ic('check',15)} Lưu</button>`:''}
+     <button class="btn" ${printable?'':'disabled aria-disabled="true" title="Lưu hồ sơ trước khi in"'} onclick="printEncounter('${eid}')">${ic('file',16)} In hồ sơ</button>
+     ${can('data.export')?`<button class="btn" ${printable?'':'disabled aria-disabled="true" title="Lưu hồ sơ trước khi xuất"'} onclick="exportEncounterPDF('${eid}')">${ic('download',16)} Xuất PDF</button>`:''}
+     ${e.status==='draft'?`<button class="btn primary" onclick="finalizeEnc('${eid}')">${ic('lock',16)} Chốt bệnh án</button>`:`<button class="btn" onclick="amendEnc('${eid}')">${ic('edit',16)} Sửa (tạo phiên bản mới)</button>`}
      <button class="btn" onclick="location.hash='#/customers/${c.id}'">Hồ sơ 360°</button>
-     <button class="btn" onclick="location.hash='#/doctor'">${ic('arrowLeft',15)} Hàng chờ</button>
-     ${e.status==='draft'?`<button class="btn primary" onclick="finalizeEnc('${eid}')">${ic('check',15)} Chốt bệnh án</button>`:`<button class="btn" onclick="amendEnc('${eid}')">${ic('edit',16)} Sửa (tạo phiên bản mới)</button>`}`)
-  + `${e.status==='final'?`<div class="alert al-ok">${ic('lock',16)} <div>Bệnh án đã <b>chốt (final, v${e.version})</b> lúc ${fmtDT(e.at)}. Mọi chỉnh sửa sau đó sẽ tạo <b>phiên bản mới</b> và ghi vào nhật ký kiểm toán — không sửa âm thầm.</div></div>`
-      :`<div class="alert al-warn">${ic('edit',16)} <div>Đang ở chế độ <b>nháp</b> — hệ thống <b>tự động lưu</b> mỗi khi bạn ngừng gõ 2 giây. Dữ liệu không mất khi tải lại trang.</div></div>`}
+     <button class="btn" onclick="location.hash='#/doctor'">${ic('arrowLeft',15)} Hàng chờ</button>`)
+  + `${e.status==='final'?`<div class="alert al-ok">${ic('lock',16)} <div>Bệnh án đã <b>chốt (final, v${e.version})</b> lúc ${fmtDT(e.finalized_at||e.at)}. Mọi chỉnh sửa sau đó sẽ tạo <b>phiên bản mới</b> và ghi vào nhật ký kiểm toán — không sửa âm thầm.</div></div>`
+      : (e.saved_at?`<div class="alert al-info" id="enc-hint">${ic('check',16)} <div>Hồ sơ đã <b>lưu</b> lúc ${fmtDT(e.saved_at)} — có thể đóng màn hình rồi mở lại để sửa tiếp, <b>in</b> hoặc <b>xuất PDF</b>. Chốt bệnh án khi đã hoàn tất.</div></div>`
+        :`<div class="alert al-warn" id="enc-hint">${ic('edit',16)} <div>Hồ sơ <b>chưa được lưu lần nào</b>. Bấm <b>Lưu</b> để giữ nội dung mà chưa cần chốt bệnh án — sau khi lưu mới in / xuất PDF được.</div></div>`)}
     <div class="grid g-3-2">
       <div class="card"><div class="card-h"><h3>Nội dung khám</h3><span class="sub">${fmtDT(e.at)} · ${esc(userName(e.doctor_id))}</span></div>
         <div class="card-b">
@@ -1362,7 +1630,8 @@ function viewEncounter(eid){
           <div class="sec-t">K. Phác đồ / liệu trình đề xuất</div>
           <div id="enc-pkg">${encPkgBlock(e,c)}</div>
           <div class="divider"></div>
-          <label class="fld"><span class="lb">M. Hẹn tái khám</span><input class="inp" type="date" value="${new Date(TODAY.getTime()+21*86400000).toISOString().slice(0,10)}" style="max-width:220px"></label>
+          <label class="fld"><span class="lb">M. Hẹn tái khám</span><input class="inp" type="date" id="enc-followup" value="${encFollowupISO(e)}" style="max-width:220px"
+            onchange="encEdit('${eid}','followup', this.value?fmtD(new Date(this.value+'T00:00:00')):'')" ${e.status==='final'?'readonly':''}></label>
         </div></div>
       <div>
         <div class="card" style="margin-bottom:14px"><div class="card-h"><h3>Sơ đồ cơ thể</h3><span class="sub">Bấm vào vùng để đánh dấu</span></div>
@@ -1407,34 +1676,64 @@ function ppPreview(){
     <div style="margin-top:7px;font-size:15px;font-weight:750">Giá niêm yết: ${money(p.price)}đ</div></div>`;
 }
 function proposePkg(eid){
+  if(!guard('treatment.propose','Bạn không có quyền đề xuất liệu trình')) return;
   const e=encById(eid), c=custById(e.customer_id);
   const pid=$('#pp-pkg').value; if(!pid) return toast('Vui lòng chọn gói điều trị','err');
   const p=pkgById(pid); const n=parseInt($('#pp-n').value)||p.sessions;
-  const co={id:'CO'+String(DB.courses.length+1).padStart(4,'0'), code:'LT-'+String(2026100+DB.courses.length),
+  const co={id:nextCourseId(), code:'LT-'+String(2026100+DB.courses.length),
     customer_id:c.id, package_id:pid, encounter_id:eid, doctor_id:S.user.id, diagnosis:e.diagnosis||c.concern,
+    area: areaForDx(e.diagnosis||c.concern),
     start_date:null, end_date_est:null, total_sessions:n, done_sessions:0,
     list_price:p.price, discount:0, total:p.price, paid:0, status:'pending',
     proposed_at:new Date(), proposed_by:S.user.id, activated_at:null, activated_by:null, op_id:pick(OPS).id,
     metrics:['M1','M2','M3'], note:$('#pp-note').value};
   DB.courses.push(co);
-  for(let i=1;i<=n;i++) DB.sessions.push({id:'SE'+(DB.sessions.length+i), course_id:co.id, no:i, at:null, doctor_id:co.doctor_id, tech_id:null, services:p.services.slice(0,3), status:'pending', before:'',intervention:'',after:'',reaction:'',note:'',recommend:''});
+  for(let i=1;i<=n;i++) DB.sessions.push({id:nextSessionId(), course_id:co.id, no:i, at:null, doctor_id:co.doctor_id, tech_id:null, services:p.services.slice(0,3), status:'pending', before:'',intervention:'',after:'',reaction:'',note:'',recommend:''});
   c.status='TREATMENT_PROPOSED';
   tl(c.id,new Date(),'pill','purple','Đề xuất liệu trình',p.name+' · '+n+' buổi · '+money(p.price)+'đ',S.user.name);
   DB.timeline.sort((x,y)=>y.at-x.at);
   toast('Đã gửi đề xuất liệu trình tới Trưởng phòng','ok'); buildNav(); render();
 }
-let _saveTimer=null;
-function encAutosave(eid,k,v){
-  const e=encById(eid); e[k]=v;
-  const ind=$('#save-ind'); ind.className='save-ind saving'; ind.innerHTML=ic('refresh',14)+' Đang lưu…';
-  clearTimeout(_saveTimer);
-  _saveTimer=setTimeout(()=>{ ind.className='save-ind saved'; ind.innerHTML=ic('check',14)+' Đã lưu lúc '+fmtT(new Date()); },900);
+function encFollowupISO(e){
+  const m=/^(\d{2})\/(\d{2})\/(\d{4})$/.exec(e.followup||'');
+  if(m) return m[3]+'-'+m[2]+'-'+m[1];
+  return new Date(TODAY.getTime()+21*86400000).toISOString().slice(0,10);
+}
+/* Ghi giá trị vào bản ghi trong bộ nhớ và đánh dấu "có thay đổi chưa lưu".
+   Nội dung không mất khi rời màn hình, nhưng trạng thái chỉ chuyển sang
+   "Đã lưu" khi bác sĩ bấm nút Lưu — đúng yêu cầu 3 trạng thái rõ ràng. */
+function encEdit(eid,k,v){
+  const e=encById(eid); if(!e || e.status==='final') return;
+  if(e[k]===v) return;
+  e[k]=v; e._dirty=true;
+  const bd=$('#enc-state');
+  if(bd){ const st=ENC_STATE.unsaved; bd.className='badge '+st.color; bd.innerHTML=ic(st.icon,14)+' Có thay đổi chưa lưu'; }
+  const hint=$('#enc-hint'); if(hint&&!hint.dataset.dirty){ hint.dataset.dirty='1';
+    hint.className='alert al-warn'; hint.innerHTML=ic('edit',16)+' <div>Nội dung vừa sửa <b>chưa được lưu</b>. Bấm <b>Lưu</b> để giữ lại mà chưa cần chốt bệnh án.</div>'; }
+}
+/* giữ tên cũ để không phá vỡ chỗ gọi sẵn có */
+function encAutosave(eid,k,v){ encEdit(eid,k,v); }
+
+function saveEnc(eid,silent){
+  if(!guard('medical','Chỉ bác sĩ mới được ghi hồ sơ khám')) return false;
+  const e=encById(eid); if(!e) return false;
+  if(e.status==='final'){ toast('Bệnh án đã chốt — dùng "Sửa (tạo phiên bản mới)" để chỉnh sửa','warn'); return false; }
+  const first=!e.saved_at;
+  e.saved_at=new Date(); e._dirty=false;
+  const c=custById(e.customer_id);
+  au(new Date(),S.user.id,'save','medical_encounters',e.id, first?'—':'draft', 'draft đã lưu (v'+e.version+')');
+  DB.audit.sort((a,b)=>b.at-a.at);
+  if(first){ tl(c.id,e.saved_at,'note','blue','Bác sĩ lưu hồ sơ khám (nháp)','Chưa chốt bệnh án — có thể sửa tiếp',S.user.name);
+    DB.timeline.sort((x,y)=>y.at-x.at); }
+  if(!silent){ toast('Đã lưu hồ sơ khám '+e.id+' — có thể mở lại để sửa, in hoặc xuất PDF','ok'); render(); }
+  return true;
 }
 function finalizeEnc(eid){
+  if(!guard('medical.finalize','Bạn không có quyền chốt bệnh án')) return;
   const e=encById(eid);
   if(!e.diagnosis) return toast('Vui lòng nhập Chẩn đoán (mục H) trước khi chốt bệnh án','err');
   confirmDlg('Chốt bệnh án','Sau khi chốt, bệnh án chuyển sang trạng thái <b>final</b>. Mọi chỉnh sửa sau đó sẽ tạo phiên bản mới và được ghi vào nhật ký kiểm toán. Tiếp tục?',
-    ()=>{ e.status='final';
+    ()=>{ e.status='final'; e.saved_at=e.saved_at||new Date(); e.finalized_at=new Date(); e._dirty=false;
       const c=custById(e.customer_id);
       tl(c.id,new Date(),'note','teal','Bác sĩ chốt hồ sơ khám','Chẩn đoán: '+e.diagnosis,S.user.name+' · v'+e.version);
       DB.timeline.sort((x,y)=>y.at-x.at);
@@ -1444,7 +1743,7 @@ function finalizeEnc(eid){
 function amendEnc(eid){
   const e=encById(eid);
   confirmDlg('Tạo phiên bản mới','Bệnh án đang ở trạng thái final v'+e.version+'. Hệ thống sẽ lưu bản gốc và mở phiên bản <b>v'+(e.version+1)+'</b> để chỉnh sửa. Lý do chỉnh sửa sẽ được ghi nhận.',
-    ()=>{ e.version++; e.status='draft';
+    ()=>{ e.version++; e.status='draft'; e.finalized_at=null; e._dirty=false; e.saved_at=new Date();
       au(new Date(),S.user.id,'amend','medical_encounters',e.id,'final (v'+(e.version-1)+')','draft (v'+e.version+')'); DB.audit.sort((a,b)=>b.at-a.at);
       toast('Đã tạo phiên bản v'+e.version,'ok'); render(); },'Tạo phiên bản mới');
 }
@@ -1538,6 +1837,7 @@ function viewTreatments(){
       ||'<tr><td colspan="11"><div class="empty"><div class="ic-box">'+ic('package',16)+'</div><div class="t">Không có liệu trình</div></div></td></tr>'}</tbody></table></div></div>`;
 }
 function activateCourse(id){
+  if(!guard('treatment.approve','Chỉ Trưởng phòng / Quản trị được kích hoạt liệu trình')) return;
   const co=courseById(id), c=custById(co.customer_id), p=pkgById(co.package_id);
   modal(`<div class="modal"><div class="modal-h"><h3>Xác nhận &amp; kích hoạt liệu trình</h3><button class="x" onclick="closeModal()">${ic('x',16)}</button></div>
   <div class="modal-b">
@@ -1550,8 +1850,9 @@ function activateCourse(id){
       <label class="fld"><span class="lb">Giảm giá</span><input class="inp" type="number" id="ac-disc" value="0" step="100000" oninput="$('#ac-total').textContent=money(${co.list_price}-(+this.value||0))+'đ'"></label>
       <label class="fld"><span class="lb">Ngày bắt đầu <span class="req">*</span></span><input class="inp" type="date" id="ac-start" value="${new Date(TODAY.getTime()+86400000).toISOString().slice(0,10)}"></label>
     </div>
-    <label class="fld"><span class="lb">Bác sĩ phụ trách liệu trình</span><select class="inp" id="ac-doc">${DOCTORS.map(u=>`<option value="${u.id}" ${u.id===co.doctor_id?'selected':''}>${u.name}</option>`).join('')}</select></label>
-    <label class="fld"><span class="lb">OP phụ trách chăm sóc</span><select class="inp" id="ac-op">${OPS.map(u=>`<option value="${u.id}">${u.name}</option>`).join('')}</select></label>
+    <label class="fld"><span class="lb">Bác sĩ phụ trách liệu trình</span><select class="inp" id="ac-doc">${doctorList().map(u=>`<option value="${u.id}" ${u.id===co.doctor_id?'selected':''}>${esc(u.name)}</option>`).join('')}</select></label>
+    <label class="fld"><span class="lb">OP phụ trách chăm sóc</span><select class="inp" id="ac-op">${opList().map(u=>`<option value="${u.id}" ${u.id===co.op_id?'selected':''}>${esc(u.name)}</option>`).join('')}</select></label>
+    <label class="fld"><span class="lb">Vùng điều trị</span><select class="inp" id="ac-area">${TREAT_AREAS.map(a=>`<option ${a===(co.area||areaForDx(co.diagnosis))?'selected':''}>${a}</option>`).join('')}</select></label>
     <div class="sec-t">Chỉ số lượng giá theo dõi</div>
     <div class="chips">${DB.metrics.filter(m=>m.active).map(m=>`<div class="chip ${co.metrics.includes(m.id)?'on':''}" onclick="this.classList.toggle('on')" data-m="${m.id}">${m.name}</div>`).join('')}</div>
     <div style="margin-top:14px;padding:12px;background:var(--brand-50);border-radius:10px;display:flex;justify-content:space-between;align-items:center">
@@ -1560,12 +1861,14 @@ function activateCourse(id){
   <div class="modal-f"><button class="btn" onclick="closeModal()">Hủy</button><button class="btn primary" onclick="doActivate('${id}')">${ic('unlock',16)} Kích hoạt liệu trình</button></div></div>`);
 }
 function doActivate(id){
+  if(!guard('treatment.approve','Chỉ Trưởng phòng / Quản trị được kích hoạt liệu trình')) return;
   const co=courseById(id), c=custById(co.customer_id), p=pkgById(co.package_id);
   const disc=+$('#ac-disc').value||0;
   co.discount=disc; co.total=co.list_price-disc;
   co.start_date=new Date($('#ac-start').value+'T09:00:00');
   co.end_date_est=new Date(co.start_date.getTime()+co.total_sessions*3*86400000);
   co.doctor_id=$('#ac-doc').value; co.op_id=$('#ac-op').value;
+  if($('#ac-area')) co.area=$('#ac-area').value;
   co.metrics=[...document.querySelectorAll('.chip.on[data-m]')].map(x=>x.dataset.m);
   co.status='active'; co.activated_at=new Date(); co.activated_by=S.user.id;
   const ss=courseSessions(id);
@@ -1591,12 +1894,22 @@ function viewCourse(id){
   const doneS=ss.filter(s=>s.status==='done');
   const nextS=ss.find(s=>s.status==='booked')||ss.find(s=>s.status==='pending');
   const pct=Math.round(co.done_sessions/co.total_sessions*100);
-  if(co.status==='pending') return head('Liệu trình '+co.code,esc(c.name))+`<div class="card"><div class="empty"><div class="ic-box">${ic('lock',16)}</div><div class="t">Liệu trình chưa được kích hoạt</div><div>Đang chờ Trưởng phòng xác nhận. Chưa thể tạo buổi điều trị hay ghi nhận chỉ số.</div>${can('treatment.approve')?`<button class="btn primary" style="margin-top:12px" onclick="activateCourse('${id}')">${ic('unlock',16)} Kích hoạt ngay</button>`:''}</div></div>`;
-  return head(esc(c.name)+' — '+esc(p.name),'<span class="mono">'+co.code+'</span> · '+esc(co.diagnosis)+' · BS. phụ trách: '+esc(userName(co.doctor_id)),
+  if(co.status==='pending') return head('Liệu trình '+co.code, esc(c.name)+(co.area?' · vùng '+esc(co.area):'')+' · '+esc(p.name),
+      `<button class="btn" onclick="location.hash='#/customers/${c.id}'">Hồ sơ 360°</button>`)
+    +`<div class="card"><div class="empty"><div class="ic-box">${ic('lock',16)}</div><div class="t">Liệu trình chưa được kích hoạt</div><div>Đang chờ Trưởng phòng xác nhận. Chưa thể tạo buổi điều trị hay ghi nhận chỉ số.</div>${can('treatment.approve')?`<button class="btn primary" style="margin-top:12px" onclick="activateCourse('${id}')">${ic('unlock',16)} Kích hoạt ngay</button>`:''}</div></div>`;
+  const allCos=custCourses(co.customer_id);
+  return head(esc(c.name)+' — '+esc(p.name),'<span class="mono">'+co.code+'</span> · '+esc(co.diagnosis)+(co.area?' · vùng '+esc(co.area):'')+' · BS. phụ trách: '+esc(co.doctor_id?userName(co.doctor_id):'—'),
     `<button class="btn" onclick="location.hash='#/customers/${c.id}'">Hồ sơ 360°</button>
      <button class="btn" onclick="callModal('${c.id}')">${ic('phone',15)} Gọi khách</button>
+     ${can('treatment.purchase')?`<button class="btn" onclick="openAddPackage('${c.id}','${esc(co.area||'')}')">${ic('package',16)} Mua thêm gói</button>`:''}
      <button class="btn primary" onclick="openBooking('${c.id}')">${ic('calendar',16)} Đặt buổi tiếp theo</button>`)
-  + `<div class="grid g4" style="margin-bottom:14px">
+  + `${allCos.length>1?`<div class="card" style="margin-bottom:14px"><div class="card-h"><h3>Các gói trị liệu của khách</h3>
+      <span class="badge b-gray nodot">${allCos.length} gói</span><span class="sub">bấm để chuyển gói · dữ liệu từng gói tách biệt</span></div>
+      <div class="card-b"><div class="chips">${allCos.map(x=>`<div class="chip ${x.id===co.id?'on':''}" role="button" tabindex="0"
+        onclick="location.hash='#/treatment/${x.id}'" onkeydown="if(event.key==='Enter'){location.hash='#/treatment/${x.id}'}">
+        ${esc(pkgById(x.package_id).name.split(' - ')[0])}${x.area?' · '+esc(x.area):''}
+        <span class="cnt">${x.done_sessions}/${x.total_sessions}</span></div>`).join('')}</div></div></div>`:''}
+    <div class="grid g4" style="margin-bottom:14px">
       <div class="stat"><div class="lb">Tiến độ liệu trình</div><div class="vl">${co.done_sessions} / ${co.total_sessions}</div>
         <div class="progress" style="margin-top:9px"><i style="width:${pct}%"></i></div>
         <div class="df flat" style="margin-top:6px">${pct}% hoàn thành</div></div>
@@ -1607,7 +1920,7 @@ function viewCourse(id){
     ${progressBlock(co)}
     <div class="grid g-2-1" style="margin-top:14px">
       <div class="card"><div class="card-h"><h3>Lịch sử buổi điều trị</h3><span class="sub">${co.total_sessions} buổi</span>
-        <div class="r"><button class="btn sm" onclick="exportCourse(courseById('${id}'))">${ic('download',16)} Xuất</button></div></div>
+        <div class="r">${can('data.export')?`<button class="btn sm" onclick="exportCourse(courseById('${id}'))">${ic('download',16)} Xuất</button>`:''}</div></div>
         <div class="card-b">${ss.map(s=>{
           const st=SESS_ST[s.status];
           const mv=DB.metricValues.filter(v=>v.session_id===s.id);
@@ -1804,7 +2117,7 @@ function viewOP(){
   const tasks=DB.careTasks;
   const byReason={}; tasks.forEach(t=>byReason[t.reason]=(byReason[t.reason]||0)+1);
   return head('Chăm sóc khách hàng (OP)','Khách đang trong liệu trình cần theo dõi · '+fmtD(TODAY),
-    `<button class="btn" onclick="exportCare(DB.careTasks)">${ic('download',16)} Xuất</button>`)
+    `${can('data.export')?`<button class="btn" onclick="exportCare(DB.careTasks)">${ic('download',16)} Xuất</button>`:''}`)
   + `<div class="grid g5" style="margin-bottom:14px">
       ${stat('Cần chăm sóc hôm nay',tasks.length,'','heart','dn')}
       ${Object.entries(CARE_REASON).map(([k,v])=>stat(v.label,byReason[k]||0,'','•',byReason[k]?'dn':'flat')).slice(0,4).join('')}
@@ -1838,7 +2151,7 @@ function viewPayments(){
   const month=DB.payments.filter(p=>new Date(p.at).getMonth()===TODAY.getMonth()).reduce((a,b)=>a+b.amount,0);
   const debt=DB.courses.filter(c=>c.status!=='pending').reduce((a,b)=>a+Math.max(0,b.total-b.paid),0);
   return head('Thanh toán','Mọi giao dịch đều bất biến — sai sót được xử lý bằng bút toán điều chỉnh có kiểm toán',
-    `<button class="btn" onclick="exportPayments(window._payList||[])">${ic('download',16)} Xuất Excel</button>
+    `${can('data.export')?`<button class="btn" onclick="exportPayments(window._payList||[])">${ic('download',16)} Xuất Excel</button>`:''}
      <button class="btn primary" onclick="openPayment()">${ic('plus',16)} Tạo phiếu thu</button>`)
   + `<div class="grid g4" style="margin-bottom:14px">
       ${stat('Thu hôm nay',money(today)+'đ',DB.payments.filter(p=>sameDay(p.at,TODAY)).length+' giao dịch','banknote','up')}
@@ -1941,7 +2254,7 @@ function viewReports(kind){
     const rate=(a,b)=>b?Math.round(a/b*100):0;
     const cls=v=>v>=40?'hi':v>=20?'md':'lo';
     body=`<div class="card"><div class="card-h"><h3>Bảng hiệu quả Telesales</h3><span class="sub">${RANGES[S.range]} · sắp xếp theo số gói chốt</span>
-      <div class="r"><button class="btn sm" onclick="exportReport('telesales')">${ic('download',15)} Xuất</button></div></div>
+      <div class="r">${can('data.export')?`<button class="btn sm" onclick="exportReport('telesales')">${ic('download',15)} Xuất</button>`:''}</div></div>
       <div class="tbl-wrap"><table><thead><tr><th>Nhân viên</th><th class="t-center">Lead</th><th class="t-center">Cuộc gọi</th><th class="t-center">Đặt lịch</th><th class="t-center">Đến khám</th><th class="t-center">Chốt gói</th>
       <th class="t-center">Lead${ic('arrowRight',15)}Lịch</th><th class="t-center">Lịch'+ic('arrowRight',15)+'Đến</th><th class="t-center">Đến${ic('arrowRight',15)}Gói</th><th class="t-right">Doanh thu</th></tr></thead>
       <tbody>${rows.map(r=>`<tr><td><div style="display:flex;align-items:center;gap:8px"><div class="avatar">${initials(r.u.name)}</div>
@@ -1972,7 +2285,7 @@ function viewReports(kind){
     window._mkRows=rows;
     body=`<div class="alert al-info">${ic('info',16)} <div>Doanh thu được tính từ <b>giao dịch thực thu</b>, không tính theo giá gói khi khách chưa thanh toán — để biết chính xác quảng cáo nào sinh ra tiền thật.</div></div>
       <div class="card"><div class="card-h"><h3>Hiệu quả theo chiến dịch</h3><span class="sub">Nguồn ${ic('arrowRight',15)} Lead '+ic('arrowRight',15)+' Lịch '+ic('arrowRight',15)+' Đến '+ic('arrowRight',15)+' Gói ${ic('arrowRight',15)} Doanh thu</span>
-      <div class="r"><button class="btn sm" onclick="exportMarketing(window._mkRows||[])">${ic('download',16)} Xuất</button></div></div>
+      <div class="r">${can('data.export')?`<button class="btn sm" onclick="exportMarketing(window._mkRows||[])">${ic('download',16)} Xuất</button>`:''}</div></div>
       <div class="tbl-wrap"><table><thead><tr><th>Chiến dịch</th><th>Nguồn</th><th class="t-right">Chi phí</th><th class="t-center">Lead</th><th class="t-center">Lịch</th><th class="t-center">Đến</th><th class="t-center">Gói</th><th class="t-right">CPL</th><th class="t-right">Doanh thu</th><th class="t-center">ROAS</th></tr></thead>
       <tbody>${rows.map(r=>`<tr class="row-link" onclick="drillCampaign('${r.cp.id}')">
         <td><div class="t-name">${esc(r.cp.name)}</div><div class="t-sub">${esc(r.cp.adset)} · ${esc(r.cp.ad)}</div></td>
@@ -2023,14 +2336,14 @@ function viewReports(kind){
         </div></div>`).join('')}</div>`;
   }
   return head('Báo cáo','Số liệu lấy từ giao dịch &amp; hoạt động thực tế · khoảng thời gian: <b>'+RANGES[S.range]+'</b>',
-    `${rangeSelect()}<button class="btn" onclick="exportReport('${kind}')">${ic('download',16)} Xuất Excel</button>`)
+    `${rangeSelect()}${can('data.export')?`<button class="btn" onclick="exportReport('${kind}')">${ic('download',16)} Xuất Excel</button>`:''}`)
   + `<div class="card" style="margin-bottom:14px"><div class="tabs">${tabs.map(([k,l])=>`<div class="tab ${kind===k?'on':''}" onclick="location.hash='#/reports${k==='overview'?'':'/'+k}'">${l}</div>`).join('')}</div></div>`+body;
 }
 
 /* ================= ADMIN ================= */
 function viewAdminUsers(){
   return head('Người dùng &amp; phân quyền','Một tài khoản có thể mang nhiều vai trò. RBAC được kiểm tra ở tầng máy chủ và Row-Level Security, không chỉ ẩn menu.',
-    `<button class="btn" onclick="exportUsers()">${ic('download',16)} Xuất</button>
+    `${can('data.export')?`<button class="btn" onclick="exportUsers()">${ic('download',16)} Xuất</button>`:''}
      <button class="btn" onclick="location.hash='#/admin/roles'">${ic('shield',16)} Vai trò &amp; quyền</button>
      <button class="btn" onclick="location.hash='#/admin/staff-import'">${ic('upload',16)} Import từ Excel</button>
      <button class="btn primary" onclick="openUserForm()">${ic('userPlus',16)} Thêm người dùng</button>`)
@@ -2187,7 +2500,7 @@ function viewAudit(){
   const AC={create:'b-green',update:'b-blue',delete:'b-red',status_change:'b-purple',payment:'b-teal',reversal:'b-red',
     activate:'b-green',finalize:'b-teal',amend:'b-amber',permission_change:'b-red',import:'b-purple',assign:'b-blue'};
   return head('Nhật ký hệ thống (Audit log)','Mọi thay đổi quan trọng đều được ghi lại: ai – làm gì – trên bản ghi nào – trước/sau – khi nào',
-    `<button class="btn" onclick="exportAudit(window._auList||[])">${ic('download',16)} Xuất</button>`)
+    `${can('data.export')?`<button class="btn" onclick="exportAudit(window._auList||[])">${ic('download',16)} Xuất</button>`:''}`)
   + `<div class="card"><div class="toolbar">
       <select class="inp" onchange="S.filters.au.action=this.value;render()"><option value="">Mọi hành động</option>${actions.map(a=>`<option ${f.action===a?'selected':''}>${a}</option>`).join('')}</select>
       <select class="inp" onchange="S.filters.au.entity=this.value;render()"><option value="">Mọi bảng dữ liệu</option>${entities.map(a=>`<option ${f.entity===a?'selected':''}>${a}</option>`).join('')}</select>
